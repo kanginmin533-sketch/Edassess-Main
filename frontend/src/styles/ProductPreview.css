@@ -1,0 +1,195 @@
+.preview-section {
+  padding: 100px 0 110px;
+  background: var(--white);
+}
+
+.preview-header {
+  max-width: 640px;
+  margin: 0 auto 56px;
+  text-align: center;
+}
+
+.preview-header .section-label {
+  justify-content: center;
+}
+.preview-header .section-label::before { display: none; }
+
+.preview-header .section-rule {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.preview-header .body-text {
+  margin: 0 auto;
+}
+
+.preview-frame {
+  max-width: 920px;
+  margin: 0 auto;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--white);
+  border: 1px solid var(--rule);
+  box-shadow: 0 40px 80px -30px rgba(17, 28, 51, 0.35);
+  transform: perspective(1400px) rotateX(1.5deg);
+}
+
+.preview-chrome {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  background: var(--navy-deep);
+}
+
+.preview-dots { display: flex; gap: 6px; }
+.preview-dots span {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: rgba(255,255,255,0.25);
+}
+
+.preview-chrome-title {
+  flex: 1;
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.6);
+  letter-spacing: 0.02em;
+}
+
+.preview-timer {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--gold-light);
+  background: rgba(200,155,60,0.14);
+  border: 1px solid rgba(200,155,60,0.3);
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+
+.preview-body {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  background: var(--sand);
+}
+
+.preview-nav {
+  padding: 24px 20px;
+  border-right: 1px solid var(--rule);
+  background: var(--white);
+}
+
+.preview-nav-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+.preview-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.nav-dot {
+  aspect-ratio: 1;
+  border-radius: 5px;
+  background: var(--sand);
+  border: 1px solid var(--rule);
+}
+.nav-dot.answered { background: var(--gold-pale); border-color: var(--gold-light); }
+.nav-dot.current { background: var(--navy); border-color: var(--navy); }
+
+.preview-nav-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.preview-nav-legend span { display: flex; align-items: center; gap: 7px; }
+.preview-nav-legend .dot {
+  width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+}
+.dot.answered { background: var(--gold-light); }
+.dot.flagged { background: var(--navy); }
+
+.preview-question { padding: 28px 32px; }
+
+.preview-progress {
+  height: 4px;
+  background: var(--rule);
+  border-radius: 2px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.preview-progress-fill {
+  width: 6%;
+  height: 100%;
+  background: var(--gold);
+}
+
+.preview-qnum {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 12px;
+}
+
+.preview-qtext {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 21px;
+  color: var(--navy);
+  line-height: 1.5;
+  margin-bottom: 22px;
+}
+
+.preview-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.preview-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--rule);
+  background: var(--white);
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.preview-choice.selected {
+  border-color: var(--navy);
+  background: var(--navy);
+  color: var(--white);
+}
+
+.choice-letter {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 500;
+  background: var(--sand);
+  color: var(--navy);
+  flex-shrink: 0;
+}
+.preview-choice.selected .choice-letter {
+  background: var(--gold);
+  color: var(--navy-deep);
+}
+
+@media (max-width: 760px) {
+  .preview-body { grid-template-columns: 1fr; }
+  .preview-nav { border-right: none; border-bottom: 1px solid var(--rule); }
+  .preview-frame { transform: none; }
+}

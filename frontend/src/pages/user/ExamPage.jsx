@@ -1,0 +1,479 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { AlertTriangle, Flag, ChevronLeft, ChevronRight, Send, X, Clock } from 'lucide-react';
+import useQuestionBank from '../../hooks/useQuestionBank';
+import { examApi } from '../../api/examApi';
+
+// Maps the route-level examType to the category stored in the question bank
+const CATEGORY_MAP = { gened: 'GenEd', profed: 'ProfEd', major: 'Major' };
+
+// How many question numbers to show per page in the navigator sidebar.
+// Prevents the grid from becoming a huge unreadable wall of buttons on
+// 150-item LET simulations.
+const NAV_PAGE_SIZE = 25;
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ── Warning Thresholds (in seconds) ──────────────────────────────────────
+const WARNINGS = [
+  { at: 30 * 60, label: '⚠️ 30 minutes remaining!',  shown: false },
+  { at: 10 * 60, label: '⚠️ 10 minutes remaining!',  shown: false },
+  { at:  5 * 60, label: '🚨 Only 5 minutes left!',   shown: false },
+];
+
+export default function ExamPage() {
+  const location = useLocation();
+  const navigate  = useNavigate();
+  const state     = location.state;
+
+  // Read-only access to the real question bank
+  const { questions: bank, loading: bankLoading } = useQuestionBank();
+
+  // ── Guard: redirect if no state ──────────────────────────────────────────
+  useEffect(() => {
+    if (!state) navigate('/dashboard/selection', { replace: true });
+  }, [state, navigate]);
+
+  const {
+    examId,
+    examType    = 'gened',
+    label       = 'General Education',
+    short       = 'GenEd',
+    totalItems  = 20,
+    durationMin = 120,
+    color       = 'green',
+  } = state || {};
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  // Fetches the SPECIFIC exam (with instructor-curated questions) by examId,
+  // passed from ExamSelectionPage. Falls back to a random category pull only
+  // if no examId was provided (shouldn't normally happen).
+  const [questions, setQuestions] = useState([]);
+  const [questionsReady, setQuestionsReady] = useState(false);
+
+  useEffect(() => {
+    async function loadQuestions() {
+      if (examId) {
+        try {
+          const exam = await examApi.getExamById(examId);
+          setQuestions(exam.questions.map((q) => ({
+            id: q.id,
+            question: q.question,
+            choices: q.choices,
+            answer: q.answer,
+            subject: q.subject || q.category,
+            explanation: q.explanation,
+          })));
+        } catch (err) {
+          console.error('Failed to load exam:', err);
+        } finally {
+          setQuestionsReady(true);
+        }
+        return;
+      }
+
+      // Fallback: no examId — pull randomly from the category (legacy path)
+      if (bankLoading) return;
+      const category = CATEGORY_MAP[examType] || 'GenEd';
+      const pool = bank.filter((q) => q.category === category);
+      const picked = shuffle(pool).slice(0, totalItems);
+      setQuestions(picked.map((q) => ({
+        id: q.id,
+        question: q.question,
+        choices: q.choices,
+        answer: q.answer,
+        subject: q.subject || q.category,
+        explanation: q.explanation,
+      })));
+      setQuestionsReady(true);
+    }
+    loadQuestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examId, bankLoading]);
+
+  const [current,  setCurrent]   = useState(0);
+  const [navPage,  setNavPage]   = useState(0);
+  const [answers,  setAnswers]   = useState({});
+  const [flagged,  setFlagged]   = useState(new Set());
+  const [timeLeft, setTimeLeft]  = useState(durationMin * 60);
+  const [toast,    setToast]     = useState(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const warningsRef = useRef(WARNINGS.map((w) => ({ ...w })));
+  const toastTimer  = useRef(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // ── Timer ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!questionsReady) return; // don't start the countdown before questions exist
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleSubmit(true); // Auto-submit
+          return 0;
+        }
+
+        // Check warning thresholds
+        warningsRef.current.forEach((w) => {
+          if (!w.shown && prev <= w.at + 1 && prev >= w.at) {
+            w.shown = true;
+            showToast(w.label);
+          }
+        });
+
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [questionsReady]);
+
+  // Keep the navigator's visible page in sync with the current question,
+  // e.g. jumping from #25 to #26 auto-advances the navigator to the next page.
+  useEffect(() => {
+    setNavPage(Math.floor(current / NAV_PAGE_SIZE));
+  }, [current]);
+
+  // ── Toast helper ──────────────────────────────────────────────────────────
+  const showToast = (msg) => {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 8000);
+  };
+
+  // ── Format time ───────────────────────────────────────────────────────────
+  const formatTime = (secs) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  const timerClass = timeLeft <= 5 * 60
+    ? 'exam-timer danger'
+    : timeLeft <=10 * 60
+    ? 'exam-timer warning'
+    : 'exam-timer normal';
+
+  // ── Answer / Flag ─────────────────────────────────────────────────────────
+  const handleAnswer = (choiceIdx) => {
+    setAnswers((prev) => ({ ...prev, [current]: choiceIdx }));
+  };
+
+  const toggleFlag = () => {
+    setFlagged((prev) => {
+      const next = new Set(prev);
+      next.has(current) ? next.delete(current) : next.add(current);
+      return next;
+    });
+  };
+
+  // ── Submit ────────────────────────────────────────────────────────────────
+  const handleSubmit = useCallback(async (autoSubmit = false) => {
+    if (submitting) return;
+    setSubmitting(true);
+
+    const score = questions.reduce((acc, q, i) => {
+      return answers[i] === q.answer ? acc + 1 : acc;
+    }, 0);
+
+    const pct = Math.round((score / questions.length) * 100);
+    const timeTaken = durationMin * 60 - timeLeft;
+    const category = CATEGORY_MAP[examType] || 'GenEd';
+
+    // Per-subject breakdown, e.g. { Mathematics: { correct: 8, total: 15 }, ... }
+    const subjectBreakdown = questions.reduce((acc, q, i) => {
+      const subj = q.subject || 'General';
+      if (!acc[subj]) acc[subj] = { correct: 0, total: 0 };
+      acc[subj].total += 1;
+      if (answers[i] === q.answer) acc[subj].correct += 1;
+      return acc;
+    }, {});
+
+    let savedAttempt = null;
+    try {
+      savedAttempt = await examApi.createAttempt({
+        exam_type: examType,
+        category,
+        label,
+        score,
+        total: questions.length,
+        percentage: pct,
+        passed: pct >= 75,
+        time_taken_seconds: timeTaken,
+        auto_submit: autoSubmit,
+        subject_breakdown: subjectBreakdown,
+        detail: { questions, answers },
+      });
+    } catch (err) {
+      console.error('Failed to save exam attempt:', err);
+      // Continue to results even if the save fails — the student shouldn't
+      // lose their completed exam just because of a network hiccup.
+    }
+
+    navigate(savedAttempt ? `/dashboard/results/${savedAttempt.id}` : '/dashboard/results', {
+      replace: true,
+      state: {
+        examType,
+        label,
+        short,
+        color,
+        score,
+        total:      questions.length,
+        percentage: pct,
+        timeTaken,
+        autoSubmit,
+        answers,
+        questions,
+        subjectBreakdown,
+      },
+    });
+  }, [questions, answers, timeLeft, navigate, examType, label, short, color, durationMin, submitting]);
+
+  if (!state) return null;
+
+  if (bankLoading || !questionsReady) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+        <p style={{ color: 'var(--user-text-sub)' }}>Loading exam questions...</p>
+      </div>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16 }}>
+        <p style={{ color: 'var(--user-text-sub)' }}>No questions available for {label} yet. Ask your instructor to add some to the Question Bank.</p>
+        <button className="exam-btn exam-btn-primary" onClick={() => navigate('/dashboard/selection')}>Back to Selection</button>
+      </div>
+    );
+  }
+
+  const q           = questions[current];
+  const answered    = Object.keys(answers).length;
+  const progress    = ((current + 1) / questions.length) * 100;
+  const isFlagged   = flagged.has(current);
+  const isAnswered  = answers[current] !== undefined;
+  const isLast      = current === questions.length - 1;
+
+  const totalNavPages = Math.ceil(questions.length / NAV_PAGE_SIZE) || 1;
+  const navStart = navPage * NAV_PAGE_SIZE;
+  const navEnd = Math.min(navStart + NAV_PAGE_SIZE, questions.length);
+
+  return (
+    <div className="exam-shell">
+
+      {/* ── Warning Toast ── */}
+      {toast && (
+        <div className="exam-warning-toast">
+          <AlertTriangle size={18} />
+          <span className="exam-warning-toast-text">{toast}</span>
+          <button className="exam-warning-toast-close" onClick={() => setToast(null)}>
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {/* ── Header ── */}
+      <div className="exam-header">
+        <div className="exam-header-left">
+          <span className="exam-header-title">{label} — LET Simulation</span>
+          <span className="exam-header-sub">{answered} of {questions.length} answered</span>
+        </div>
+
+        {/* Timer */}
+        <div className={timerClass}>
+          <Clock size={18} />
+          {formatTime(timeLeft)}
+        </div>
+
+        <button
+          className="exam-btn exam-btn-submit"
+          onClick={() => setShowConfirm(true)}
+          style={{ padding: '8px 16px', fontSize: 13 }}
+        >
+          <Send size={14} /> Submit Exam
+        </button>
+      </div>
+
+      {/* ── Body ── */}
+      <div className="exam-body">
+
+        {/* Question Navigator */}
+        <div className="exam-nav-panel">
+          <div className="exam-nav-title">Questions</div>
+
+          {totalNavPages > 1 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 }}>
+              {Array.from({ length: totalNavPages }, (_, p) => {
+                const start = p * NAV_PAGE_SIZE + 1;
+                const end = Math.min(start + NAV_PAGE_SIZE - 1, questions.length);
+                const pageHasFlag = Array.from(flagged).some((i) => i >= p * NAV_PAGE_SIZE && i < p * NAV_PAGE_SIZE + NAV_PAGE_SIZE);
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setNavPage(p)}
+                    className={`exam-btn ${p === navPage ? 'exam-btn-primary' : 'exam-btn-secondary'}`}
+                    style={{ fontSize: 11, padding: '4px 8px', position: 'relative' }}
+                  >
+                    {start}–{end}
+                    {pageHasFlag && (
+                      <span style={{ position: 'absolute', top: -3, right: -3, width: 7, height: 7, borderRadius: '50%', background: 'var(--user-amber)' }} />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="exam-nav-grid">
+            {questions.slice(navStart, navEnd).map((_, i) => {
+              const qIndex = navStart + i;
+              return (
+                <button
+                  key={qIndex}
+                  className={[
+                    'exam-nav-btn',
+                    answers[qIndex] !== undefined ? 'answered' : '',
+                    qIndex === current ? 'current' : '',
+                    flagged.has(qIndex) ? 'flagged' : '',
+                  ].filter(Boolean).join(' ')}
+                  onClick={() => setCurrent(qIndex)}
+                >
+                  {qIndex + 1}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="exam-nav-legend">
+            <div className="exam-nav-legend-row">
+              <div className="exam-nav-legend-dot" style={{ background: 'var(--user-accent)' }} />
+              Answered ({answered})
+            </div>
+            <div className="exam-nav-legend-row">
+              <div className="exam-nav-legend-dot" style={{ background: 'var(--user-amber)' }} />
+              Flagged ({flagged.size})
+            </div>
+            <div className="exam-nav-legend-row">
+              <div className="exam-nav-legend-dot" style={{ background: 'var(--user-border)', border: '1px solid var(--user-border-dark)' }} />
+              Unanswered ({questions.length - answered})
+            </div>
+          </div>
+        </div>
+
+        {/* Question Card */}
+        <div className="exam-question-area">
+          <div className="exam-q-card">
+
+            {/* Progress Bar */}
+            <div className="exam-q-header">
+              <span className="exam-q-number">Question {current + 1} of {questions.length}</span>
+              <div className="exam-q-progress-bar">
+                <div className="exam-q-progress-fill" style={{ width: `${progress}%` }} />
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--user-text-muted)' }}>{Math.round(progress)}%</span>
+            </div>
+
+            {/* Question Text */}
+            <div className="exam-q-body">
+              <p className="exam-q-text">{q.question}</p>
+
+              {/* Choices */}
+              <div className="exam-choices">
+                {q.choices.map((choice, i) => (
+                  <div
+                    key={i}
+                    className={`exam-choice ${answers[current] === i ? 'selected' : ''}`}
+                    onClick={() => handleAnswer(i)}
+                  >
+                    <div className="exam-choice-letter">
+                      {String.fromCharCode(65 + i)}
+                    </div>
+                    <span className="exam-choice-text">{choice}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer Nav */}
+            <div className="exam-q-footer">
+              <button
+                className="exam-btn exam-btn-secondary"
+                onClick={() => setCurrent((p) => Math.max(0, p - 1))}
+                disabled={current === 0}
+              >
+                <ChevronLeft size={15} /> Previous
+              </button>
+
+              <button
+                className={`exam-btn ${isFlagged ? 'exam-btn-flag' : 'exam-btn-secondary'}`}
+                onClick={toggleFlag}
+              >
+                <Flag size={14} />
+                {isFlagged ? 'Flagged' : 'Flag'}
+              </button>
+
+              {isLast ? (
+                <button
+                  className="exam-btn exam-btn-submit"
+                  onClick={() => setShowConfirm(true)}
+                >
+                  <Send size={14} /> Submit
+                </button>
+              ) : (
+                <button
+                  className="exam-btn exam-btn-primary"
+                  onClick={() => setCurrent((p) => Math.min(questions.length - 1, p + 1))}
+                >
+                  Next <ChevronRight size={15} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Confirm Submit Modal ── */}
+      {showConfirm && (
+        <div className="inst-modal-backdrop" onClick={() => setShowConfirm(false)}>
+          <div className="inst-modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="inst-modal-header">
+              <h3>Submit Exam?</h3>
+              <button className="inst-btn-icon" onClick={() => setShowConfirm(false)}><X size={16} /></button>
+            </div>
+            <div className="inst-modal-body">
+              <p style={{ fontSize: 14, color: 'var(--user-text-sub)', margin: '0 0 16px', lineHeight: 1.6 }}>
+                You have answered <strong>{answered}</strong> of <strong>{questions.length}</strong> questions.
+                {answered < questions.length && (
+                  <span style={{ color: 'var(--user-danger)' }}> {questions.length - answered} question(s) unanswered.</span>
+                )}
+              </p>
+              <p style={{ fontSize: 13, color: 'var(--user-text-muted)', margin: 0 }}>
+                Once submitted, you cannot go back. Are you sure?
+              </p>
+            </div>
+            <div className="inst-modal-footer">
+              <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={() => setShowConfirm(false)}>
+                Continue Exam
+              </button>
+              <button className="inst-btn inst-btn-primary inst-btn-sm" onClick={() => handleSubmit(false)} disabled={submitting}>
+                <Send size={13} /> {submitting ? 'Submitting...' : 'Yes, Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,861 @@
+import { useState, useRef } from 'react';
+import { BookOpen, Plus, Search, Edit2, Trash2, X, Upload, FileSpreadsheet, FileText, CheckCircle, AlertCircle, Download, Copy, ClipboardCheck } from 'lucide-react';
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import useQuestionBank from '../../hooks/useQuestionBank';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
+const CATEGORIES = ['All', 'GenEd', 'ProfEd', 'Major'];
+const VALID_CATEGORIES = ['GenEd', 'ProfEd', 'Major'];
+const VALID_DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
+
+// Pulls text out of a PDF while preserving line breaks (detected via
+// vertical position changes between text fragments). Flat extraction loses
+// line structure, which the structured parser below depends on.
+async function extractPdfLines(file) {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const lines = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    let lastY = null;
+    let current = '';
+    for (const item of content.items) {
+      const y = item.transform[5];
+      if (lastY !== null && Math.abs(y - lastY) > 2) {
+        if (current.trim()) lines.push(current.trim());
+        current = item.str;
+      } else {
+        current += (current ? ' ' : '') + item.str;
+      }
+      lastY = y;
+    }
+    if (current.trim()) lines.push(current.trim());
+  }
+  return lines;
+}
+
+// ── Structured exam parser ──────────────────────────────────────────────
+// Built for a specific, common reviewer format:
+//   1. Question stem...
+//   A. Choice
+//   B. Choice
+//   C. Choice
+//   D. Choice
+//   ... (repeat) ...
+//   Part II: Answer Key and Detailed Explanations
+//   1. B. Progressivism
+//   Rationale: ...
+//   ... (repeat) ...
+// This is deterministic pattern-matching, not AI guessing — it only works
+// well when the PDF actually follows this numbering/lettering convention.
+
+function splitQuestionsAndKey(lines) {
+  const splitIdx = lines.findIndex((l) => /answer\s*key/i.test(l));
+  if (splitIdx === -1) return { questionLines: lines, keyLines: [] };
+  return { questionLines: lines.slice(0, splitIdx), keyLines: lines.slice(splitIdx + 1) };
+}
+
+function parseQuestionLines(lines) {
+  const qRe = /^(\d{1,3})\.\s*(.*)$/;
+  const cRe = /^([A-D])\.\s*(.*)$/;
+  const questions = [];
+  let current = null;
+  let field = null; // 'stem' | 'A' | 'B' | 'C' | 'D'
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || /^part\s+[ivx]+/i.test(line)) continue;
+
+    const qMatch = line.match(qRe);
+    const cMatch = line.match(cRe);
+
+    if (qMatch) {
+      if (current) questions.push(current);
+      current = { number: Number(qMatch[1]), stem: qMatch[2], choices: {} };
+      field = 'stem';
+      continue;
+    }
+    if (cMatch && current) {
+      current.choices[cMatch[1]] = cMatch[2];
+      field = cMatch[1];
+      continue;
+    }
+    if (current && field) {
+      if (field === 'stem') current.stem += ' ' + line;
+      else current.choices[field] = (current.choices[field] || '') + ' ' + line;
+    }
+  }
+  if (current) questions.push(current);
+  return questions;
+}
+
+function parseAnswerKeyLines(lines) {
+  const aRe = /^(\d{1,3})\.\s*([A-D])\.\s*(.*)$/;
+  const ratRe = /^rationale:\s*(.*)$/i;
+  const keys = {};
+  let current = null;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    const aMatch = line.match(aRe);
+    const ratMatch = line.match(ratRe);
+
+    if (aMatch) {
+      if (current) keys[current.number] = current;
+      current = { number: Number(aMatch[1]), letter: aMatch[2], answerText: aMatch[3], rationale: '' };
+      continue;
+    }
+    if (ratMatch && current) {
+      current.rationale = ratMatch[1];
+      continue;
+    }
+    if (current) {
+      if (current.rationale) current.rationale += ' ' + line;
+      else current.answerText += ' ' + line;
+    }
+  }
+  if (current) keys[current.number] = current;
+  return keys;
+}
+
+// Merges parsed questions + answer key into the same shape used everywhere
+// else (choices array, answer index, explanation). Category/subject are
+// applied afterward since the PDF text itself usually doesn't tag them.
+function mergeExamText(text) {
+  const lines = text.split('\n');
+  const { questionLines, keyLines } = splitQuestionsAndKey(lines);
+  const questions = parseQuestionLines(questionLines);
+  const keys = parseAnswerKeyLines(keyLines);
+
+  const valid = [];
+  const errors = [];
+
+  questions.forEach((q) => {
+    const choices = ['A', 'B', 'C', 'D'].map((l) => (q.choices[l] || '').trim());
+    const key = keys[q.number];
+    const errs = [];
+    if (!q.stem?.trim()) errs.push('missing question text');
+    if (choices.some((c) => !c)) errs.push('missing one or more choices A-D');
+    if (!key) errs.push('no matching answer key entry found');
+    const answerIndex = key ? 'ABCD'.indexOf(key.letter) : -1;
+    if (key && answerIndex === -1) errs.push('invalid answer letter in key');
+
+    if (errs.length) {
+      errors.push({ number: q.number, preview: (q.stem || '').slice(0, 90), errors: errs });
+      return;
+    }
+
+    valid.push({
+      question: q.stem.trim(),
+      choices,
+      answer: answerIndex,
+      explanation: (key.rationale || '').trim(),
+    });
+  });
+
+  return { valid, errors, keyFound: keyLines.length > 0 };
+}
+
+// Seed data — only used the very first time the app runs (nothing in storage yet).
+// `subject` is the fine-grained topic used later for per-subject result breakdowns.
+const SEED_QUESTIONS = [
+  { id: 1,  question: 'Which learning theory emphasizes reinforcement and punishment?',           category: 'ProfEd', subject: 'Professional Education', difficulty: 'Easy',   choices: ['Constructivism','Behaviorism','Cognitivism','Humanism'],                                          answer: 1, explanation: 'Behaviorism, associated with B.F. Skinner, focuses on observable behaviors and uses reinforcement and punishment to shape behavior.' },
+  { id: 2,  question: 'What is the primary purpose of formative assessment?',                     category: 'ProfEd', subject: 'Assessment in Learning', difficulty: 'Medium', choices: ['Grade students','Monitor learning progress','Rank students','Certify competence'],                   answer: 1, explanation: 'Formative assessment monitors student learning and provides ongoing feedback to improve teaching and learning.' },
+  { id: 3,  question: 'Solve: If 3x + 7 = 22, what is the value of x?',                          category: 'GenEd',  subject: 'Mathematics', difficulty: 'Easy',   choices: ['3','4','5','6'],                                                                                    answer: 2, explanation: '3x + 7 = 22 → 3x = 15 → x = 5. Subtract 7 from both sides, then divide by 3.' },
+  { id: 4,  question: 'Which best describes inclusive education?',                                category: 'ProfEd', subject: 'Professional Education', difficulty: 'Medium', choices: ['Only gifted students','All students regardless of ability','Only disabled students','Only public school students'], answer: 1, explanation: 'Inclusive education means all students, regardless of ability or background, learn together with appropriate support.' },
+  { id: 5,  question: 'Main goal of K to 12 curriculum in the Philippines?',                     category: 'Major',  subject: 'Major', difficulty: 'Hard',   choices: ['Reduce school years','Produce globally competitive graduates','Lower education costs','Increase enrollment'], answer: 1, explanation: 'The K to 12 program aims to produce graduates ready for higher education, employment, and entrepreneurship.' },
+  { id: 6,  question: "In Bloom's Taxonomy, which level involves creating new ideas?",           category: 'ProfEd', subject: 'Professional Education', difficulty: 'Medium', choices: ['Remembering','Understanding','Applying','Creating'],                                                answer: 3, explanation: "Creating is the highest level in Bloom's Revised Taxonomy — putting elements together to form something new." },
+  { id: 7,  question: 'What is the mitochondria often called?',                                  category: 'GenEd',  subject: 'Science', difficulty: 'Easy',   choices: ['Brain of the cell','Powerhouse of the cell','Factory of the cell','Control center'],                answer: 1, explanation: 'Mitochondria generate most of the cell\'s ATP (energy), earning the nickname "powerhouse of the cell."' },
+  { id: 8,  question: 'Which principle states that students learn best by doing?',               category: 'ProfEd', subject: 'Professional Education', difficulty: 'Medium', choices: ['Law of Readiness','Law of Exercise','Law of Effect','Law of Primacy'],                              answer: 1, explanation: "Thorndike's Law of Exercise: connections between stimuli and responses are strengthened through repeated practice." },
+  { id: 9,  question: 'What literary device compares two things using "like" or "as"?',          category: 'GenEd',  subject: 'English', difficulty: 'Easy',   choices: ['Metaphor','Simile','Personification','Hyperbole'],                                                 answer: 1, explanation: 'A simile compares two unlike things using "like" or "as." Example: "She is as brave as a lion."' },
+  { id: 10, question: 'What does PPST stand for in Philippine education?',                       category: 'Major',  subject: 'Major', difficulty: 'Medium', choices: ['Philippine Professional Skills Test','Philippine Professional Standards for Teachers','Professional Pedagogy Standards Test','Philippine Pedagogy Skills Training'], answer: 1, explanation: 'PPST defines teacher quality through domains, strands, and indicators measuring professional learning and competent practice.' },
+  { id: 11, question: 'Which approach focuses on problem-solving and critical thinking?',        category: 'ProfEd', subject: 'Professional Education', difficulty: 'Hard',   choices: ['Direct Instruction','Inquiry-Based Learning','Rote Learning','Lecture Method'],                    answer: 1, explanation: 'Inquiry-Based Learning encourages students to ask questions, investigate, and construct their own understanding.' },
+  { id: 12, question: 'What is the value of π (pi) to two decimal places?',                     category: 'GenEd',  subject: 'Mathematics', difficulty: 'Easy',   choices: ['3.12','3.14','3.16','3.18'],                                                                       answer: 1, explanation: 'Pi (π) ≈ 3.14159. Rounded to two decimal places: 3.14. It is the ratio of a circle\'s circumference to its diameter.' },
+  { id: 13, question: 'What does DepEd stand for?',                                             category: 'Major',  subject: 'Major', difficulty: 'Easy',   choices: ['Department of Education','Department of Development','Department of Evaluation','Department of Enrollment'], answer: 0, explanation: 'DepEd is the Department of Education — the Philippine government body responsible for basic education.' },
+  { id: 14, question: 'Which assessment type evaluates learning at the end of instruction?',     category: 'ProfEd', subject: 'Assessment in Learning', difficulty: 'Medium', choices: ['Formative','Diagnostic','Summative','Authentic'],                                                  answer: 2, explanation: 'Summative assessment evaluates student learning at the end of an instructional period against a standard or benchmark.' },
+  { id: 15, question: 'What is the capital of the Philippines?',                                 category: 'GenEd',  subject: 'Filipino', difficulty: 'Easy',   choices: ['Cebu City','Davao City','Manila','Quezon City'],                                                   answer: 2, explanation: 'Manila is the capital of the Philippines, located on the island of Luzon.' },
+  { id: 16, question: 'Which teaching strategy involves students working in small groups?',      category: 'ProfEd', subject: 'Professional Education', difficulty: 'Easy',   choices: ['Direct Teaching','Cooperative Learning','Lecture','Independent Study'],                            answer: 1, explanation: 'Cooperative Learning involves students working together in small groups toward a shared academic goal.' },
+  { id: 17, question: 'What is the largest planet in our solar system?',                        category: 'GenEd',  subject: 'Science', difficulty: 'Easy',   choices: ['Saturn','Neptune','Jupiter','Uranus'],                                                             answer: 2, explanation: 'Jupiter is the largest planet in our solar system, with a mass more than twice that of all other planets combined.' },
+  { id: 18, question: 'What is the Zone of Proximal Development (ZPD)?',                        category: 'ProfEd', subject: 'Professional Education', difficulty: 'Hard',   choices: ['Tasks too easy for the learner','Tasks too hard even with help','The gap between what a learner can do alone and with guidance','A zone of classroom seating'], answer: 2, explanation: "Vygotsky's ZPD is the difference between what a learner can do independently and what they can achieve with scaffolding or guidance." },
+  { id: 19, question: 'Which branch of government makes laws in the Philippines?',              category: 'GenEd',  subject: 'Filipino', difficulty: 'Medium', choices: ['Executive','Judicial','Legislative','Administrative'],                                              answer: 2, explanation: 'The Legislative branch (Congress — Senate and House of Representatives) is responsible for making laws in the Philippines.' },
+  { id: 20, question: 'What is scaffolding in the context of teaching?',                        category: 'ProfEd', subject: 'Professional Education', difficulty: 'Medium', choices: ['Building school structures','Providing temporary support to help learners','Testing student knowledge','Assigning homework'],answer: 1, explanation: 'Scaffolding refers to the temporary support provided by a teacher or more capable peer to help a student accomplish a task they could not do alone.' },
+];
+
+const DIFFICULTY_BADGE = { Easy: 'inst-badge inst-badge-success', Medium: 'inst-badge inst-badge-amber', Hard: 'inst-badge inst-badge-danger' };
+const CATEGORY_BADGE   = { GenEd: 'inst-badge inst-badge-blue', ProfEd: 'inst-badge inst-badge-purple', Major: 'inst-badge inst-badge-amber' };
+
+const EMPTY_FORM = { question: '', category: 'GenEd', subject: '', difficulty: 'Medium', choices: ['', '', '', ''], answer: 0, explanation: '' };
+
+// ---------- CSV/Excel import helpers ----------
+
+function letterToIndex(val) {
+  if (val === undefined || val === null) return -1;
+  const s = String(val).trim().toUpperCase();
+  if (['A', 'B', 'C', 'D'].includes(s)) return s.charCodeAt(0) - 65;
+  if (['1', '2', '3', '4'].includes(s)) return Number(s) - 1;
+  return -1;
+}
+
+function normalizeCategory(val) {
+  if (!val) return null;
+  const s = String(val).trim();
+  return VALID_CATEGORIES.find((c) => c.toLowerCase() === s.toLowerCase()) || null;
+}
+
+function normalizeDifficulty(val) {
+  if (!val) return 'Medium';
+  const s = String(val).trim();
+  return VALID_DIFFICULTIES.find((d) => d.toLowerCase() === s.toLowerCase()) || 'Medium';
+}
+
+function pick(row, ...keys) {
+  for (const k of keys) {
+    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') return String(row[k]).trim();
+  }
+  return '';
+}
+
+// category,subject,difficulty,question,choiceA,choiceB,choiceC,choiceD,answer,explanation
+function rowToQuestion(row, rowNumber) {
+  const question = pick(row, 'question', 'Question');
+  const choiceA = pick(row, 'choiceA', 'ChoiceA', 'choice_a', 'A');
+  const choiceB = pick(row, 'choiceB', 'ChoiceB', 'choice_b', 'B');
+  const choiceC = pick(row, 'choiceC', 'ChoiceC', 'choice_c', 'C');
+  const choiceD = pick(row, 'choiceD', 'ChoiceD', 'choice_d', 'D');
+  const answerRaw = pick(row, 'answer', 'Answer', 'correctAnswer');
+  const categoryRaw = pick(row, 'category', 'Category');
+  const subject = pick(row, 'subject', 'Subject');
+  const difficultyRaw = pick(row, 'difficulty', 'Difficulty');
+  const explanation = pick(row, 'explanation', 'Explanation');
+
+  const errors = [];
+  if (!question) errors.push('missing question text');
+
+  const choices = [choiceA, choiceB, choiceC, choiceD];
+  if (choices.some((c) => !c)) errors.push('missing one or more choices (A–D)');
+
+  const answer = letterToIndex(answerRaw);
+  if (answer === -1) errors.push('answer must be A/B/C/D or 1-4');
+
+  const category = normalizeCategory(categoryRaw);
+  if (!category) errors.push(`category must be one of ${VALID_CATEGORIES.join(', ')}`);
+
+  if (errors.length) {
+    return { valid: false, rowNumber, errors, preview: question || '(no question text)' };
+  }
+
+  return {
+    valid: true,
+    data: { question, category, subject: subject || category, difficulty: normalizeDifficulty(difficultyRaw), choices, answer, explanation },
+  };
+}
+
+async function parseFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  if (ext === 'csv') {
+    return new Promise((resolve, reject) => {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => resolve(results.data),
+        error: (err) => reject(err),
+      });
+    });
+  }
+
+  if (ext === 'xlsx' || ext === 'xls') {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(sheet, { defval: '' });
+  }
+
+  throw new Error('Unsupported file type. Please upload a .csv, .xlsx, or .xls file.');
+}
+
+function downloadTemplate() {
+  const header = 'category,subject,difficulty,question,choiceA,choiceB,choiceC,choiceD,answer,explanation\n';
+  const example = 'GenEd,Mathematics,Easy,"What is 2 + 2?","3","4","5","6",B,"2 + 2 equals 4."\n';
+  const blob = new Blob([header + example], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'edassess_question_template.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function QuestionBankPage() {
+  const { questions, loading, addQuestion, addQuestions, updateQuestion, removeQuestion } = useQuestionBank();
+
+  const [search, setSearch]       = useState('');
+  const [filter, setFilter]       = useState('All');
+  const [showModal, setShowModal] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importMode, setImportMode] = useState('file'); // 'file' | 'pdf'
+  const [pdfExtracting, setPdfExtracting] = useState(false);
+  const [pdfFileName, setPdfFileName] = useState('');
+  const [pdfRawText, setPdfRawText] = useState('');
+  const [pdfParsed, setPdfParsed] = useState(null); // { valid, errors, keyFound }
+  const [pdfCategory, setPdfCategory] = useState('GenEd');
+  const [pdfSubject, setPdfSubject] = useState('');
+  const [pdfDifficulty, setPdfDifficulty] = useState('Medium');
+  const [pdfCopied, setPdfCopied] = useState(false);
+  const [showPdfRaw, setShowPdfRaw] = useState(false);
+  const pdfRef = useRef();
+  const [editItem,  setEditItem]  = useState(null);
+  const [form, setForm]           = useState(EMPTY_FORM);
+  const [saving, setSaving]       = useState(false);
+  const [importing, setImporting]         = useState(false);
+  const [importFileName, setImportFileName] = useState('');
+  const [importResults, setImportResults]   = useState(null); // { valid: [...], errors: [...] }
+  const fileRef = useRef();
+
+  const filtered = questions.filter((q) => {
+    const matchSearch = q.question.toLowerCase().includes(search.toLowerCase());
+    const matchCat    = filter === 'All' || q.category === filter;
+    return matchSearch && matchCat;
+  });
+
+  const openAdd  = () => { setEditItem(null); setForm(EMPTY_FORM); setShowModal(true); };
+  const openEdit = (q) => {
+    setEditItem(q.id);
+    setForm({ question: q.question, category: q.category, subject: q.subject || '', difficulty: q.difficulty, choices: [...q.choices], answer: q.answer, explanation: q.explanation || '' });
+    setShowModal(true);
+  };
+  const closeModal = () => { setShowModal(false); setForm(EMPTY_FORM); setEditItem(null); };
+
+  const handleChoiceChange = (i, val) => {
+    const updated = [...form.choices]; updated[i] = val;
+    setForm((p) => ({ ...p, choices: updated }));
+  };
+
+  const handleSave = async () => {
+    if (!form.question.trim()) return alert('Question text is required.');
+    if (form.choices.some((c) => !c.trim())) return alert('All 4 choices are required.');
+    setSaving(true);
+
+    const payload = { ...form, subject: form.subject.trim() || form.category };
+
+    try {
+      if (editItem) {
+        await updateQuestion(editItem, payload);
+      } else {
+        await addQuestion(payload);
+      }
+      closeModal();
+    } catch (err) {
+      alert(err.response?.data?.detail || err.message || 'Failed to save question.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Delete this question? It will also be removed from any exam that includes it.')) return;
+    try {
+      await removeQuestion(id);
+    } catch (err) {
+      alert(err.response?.data?.detail || err.message || 'Failed to delete question.');
+    }
+  };
+
+  // ---------- Import flow ----------
+
+  const closeImport = () => {
+    setShowImport(false);
+    setImportResults(null);
+    setImportFileName('');
+    setImportMode('file');
+    setPdfParsed(null);
+    setPdfRawText('');
+    setPdfFileName('');
+    setPdfCopied(false);
+    setShowPdfRaw(false);
+    if (fileRef.current) fileRef.current.value = '';
+    if (pdfRef.current) pdfRef.current.value = '';
+  };
+
+  const handlePdfSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setPdfFileName(file.name);
+    setPdfExtracting(true);
+    setPdfParsed(null);
+    setPdfRawText('');
+    setPdfCopied(false);
+    setShowPdfRaw(false);
+    try {
+      const lines = await extractPdfLines(file);
+      const result = mergeExamText(lines.join('\n'));
+      setPdfParsed(result);
+      setPdfRawText(lines.join('\n'));
+      if (result.valid.length === 0) setShowPdfRaw(true);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to read this PDF. It may be corrupted, password-protected, or a scanned image without selectable text.');
+    }
+    setPdfExtracting(false);
+  };
+
+  const handleCopyPdfText = async () => {
+    try {
+      await navigator.clipboard.writeText(pdfRawText);
+      setPdfCopied(true);
+      setTimeout(() => setPdfCopied(false), 2000);
+    } catch (err) {
+      console.error(err);
+      alert('Could not copy automatically — please select the text and copy it manually.');
+    }
+  };
+
+  const handleConfirmPdfImport = async () => {
+    if (!pdfParsed?.valid.length) return;
+    try {
+      await addQuestions(pdfParsed.valid.map((q) => ({
+        ...q,
+        category: pdfCategory,
+        subject: pdfSubject.trim() || pdfCategory,
+        difficulty: pdfDifficulty,
+      })));
+      closeImport();
+    } catch (err) {
+      alert(err.response?.data?.detail || err.message || 'Failed to import questions.');
+    }
+  };
+
+  const handleFileSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    setImporting(true);
+    setImportResults(null);
+
+    try {
+      const rows = await parseFile(file);
+      const valid = [];
+      const errors = [];
+      rows.forEach((row, i) => {
+        const result = rowToQuestion(row, i + 2); // +2: header row + 1-indexed
+        if (result.valid) valid.push(result.data);
+        else errors.push(result);
+      });
+      setImportResults({ valid, errors });
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Failed to parse the file. Please check the format and try again.');
+    }
+    setImporting(false);
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importResults?.valid.length) return;
+    try {
+      await addQuestions(importResults.valid);
+      closeImport();
+    } catch (err) {
+      alert(err.response?.data?.detail || err.message || 'Failed to import questions.');
+    }
+  };
+
+  if (loading) {
+    return <div style={{ padding: 40, textAlign: 'center' }}>Loading question bank...</div>;
+  }
+
+  return (
+    <>
+      <div className="inst-topbar">
+        <div className="inst-topbar-left">
+          <h1>Question Bank</h1>
+          <p>{questions.length} questions total — add manually or import from CSV/Excel</p>
+        </div>
+        <div className="inst-topbar-right">
+          <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={() => setShowImport(true)}>
+            <Upload size={13} /> Import Questions
+          </button>
+          <button className="inst-btn inst-btn-primary inst-btn-sm" onClick={openAdd}>
+            <Plus size={13} /> Add Question
+          </button>
+        </div>
+      </div>
+
+      <div className="inst-content">
+        <div className="inst-card">
+          <div className="inst-card-header">
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {CATEGORIES.map((cat) => (
+                <button key={cat} className={`inst-btn inst-btn-sm ${filter === cat ? 'inst-btn-primary' : 'inst-btn-secondary'}`} onClick={() => setFilter(cat)}>{cat}</button>
+              ))}
+            </div>
+            <div className="inst-search">
+              <Search size={15} />
+              <input placeholder="Search questions..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="inst-empty"><BookOpen size={40} /><p>No questions found.</p></div>
+          ) : (
+            <table className="inst-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '42%' }}>Question</th>
+                  <th>Category</th>
+                  <th>Subject</th>
+                  <th>Difficulty</th>
+                  <th>Explanation</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((q) => (
+                  <tr key={q.id}>
+                    <td style={{ fontWeight: 500, fontSize: 13 }}>{q.question}</td>
+                    <td><span className={CATEGORY_BADGE[q.category]}>{q.category}</span></td>
+                    <td style={{ fontSize: 12.5, color: 'var(--inst-text-sub)' }}>{q.subject || '—'}</td>
+                    <td><span className={DIFFICULTY_BADGE[q.difficulty]}>{q.difficulty}</span></td>
+                    <td>
+                      {q.explanation
+                        ? <span className="inst-badge inst-badge-success"><CheckCircle size={11} /> Yes</span>
+                        : <span className="inst-badge inst-badge-neutral">No</span>}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="inst-btn-icon" onClick={() => openEdit(q)}><Edit2 size={13} /></button>
+                        <button className="inst-btn-icon" onClick={() => handleDelete(q.id)} style={{ color: 'var(--inst-danger)' }}><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <div className="inst-save-bar">
+            <p>Showing {filtered.length} of {questions.length} questions</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Add/Edit Modal */}
+      {showModal && (
+        <div className="inst-modal-backdrop" onClick={closeModal}>
+          <div className="inst-modal" style={{ maxWidth: 580 }} onClick={(e) => e.stopPropagation()}>
+            <div className="inst-modal-header">
+              <h3>{editItem ? 'Edit Question' : 'Add New Question'}</h3>
+              <button className="inst-btn-icon" onClick={closeModal}><X size={16} /></button>
+            </div>
+            <div className="inst-modal-body">
+              <div className="inst-form-group">
+                <label className="inst-form-label">Question Text</label>
+                <textarea className="inst-form-textarea" placeholder="Enter question here..." value={form.question} onChange={(e) => setForm((p) => ({ ...p, question: e.target.value }))} />
+              </div>
+              <div className="inst-three-col">
+                <div className="inst-form-group">
+                  <label className="inst-form-label">Category</label>
+                  <select className="inst-form-select" value={form.category} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}>
+                    <option value="GenEd">GenEd</option>
+                    <option value="ProfEd">ProfEd</option>
+                    <option value="Major">Major</option>
+                  </select>
+                </div>
+                <div className="inst-form-group">
+                  <label className="inst-form-label">Subject <span className="inst-form-label-sub">· e.g. Mathematics</span></label>
+                  <input className="inst-form-input" placeholder="Mathematics, Science, English..." value={form.subject} onChange={(e) => setForm((p) => ({ ...p, subject: e.target.value }))} />
+                </div>
+                <div className="inst-form-group">
+                  <label className="inst-form-label">Difficulty</label>
+                  <select className="inst-form-select" value={form.difficulty} onChange={(e) => setForm((p) => ({ ...p, difficulty: e.target.value }))}>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                  </select>
+                </div>
+              </div>
+              <div className="inst-form-group">
+                <label className="inst-form-label">Answer Choices <span className="inst-form-label-sub">· Select correct answer</span></label>
+                {form.choices.map((choice, i) => (
+                  <div className="choice-row" key={i}>
+                    <input type="radio" name="correct-answer" checked={form.answer === i} onChange={() => setForm((p) => ({ ...p, answer: i }))} />
+                    <input type="text" placeholder={`Choice ${String.fromCharCode(65 + i)}`} value={choice} onChange={(e) => handleChoiceChange(i, e.target.value)} />
+                    {form.answer === i && <span className="choice-correct-label">✓ Correct</span>}
+                  </div>
+                ))}
+              </div>
+              <div className="inst-form-group" style={{ marginBottom: 0 }}>
+                <label className="inst-form-label">Explanation / Rationale <span className="inst-form-label-sub">· Shown after exam</span></label>
+                <textarea className="inst-form-textarea" placeholder="Explain why the correct answer is right..." value={form.explanation} onChange={(e) => setForm((p) => ({ ...p, explanation: e.target.value }))} style={{ minHeight: 80 }} />
+              </div>
+            </div>
+            <div className="inst-modal-footer">
+              <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={closeModal}>Cancel</button>
+              <button className="inst-btn inst-btn-primary inst-btn-sm" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving...' : editItem ? 'Update' : 'Add Question'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CSV/Excel Import Modal */}
+      {showImport && (
+        <div className="inst-modal-backdrop" onClick={closeImport}>
+          <div className="inst-modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+            <div className="inst-modal-header">
+              <h3>Import Questions from CSV/Excel</h3>
+              <button className="inst-btn-icon" onClick={closeImport}><X size={16} /></button>
+            </div>
+            <div className="inst-modal-body">
+              <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+                <button
+                  className={`inst-btn inst-btn-sm ${importMode === 'file' ? 'inst-btn-primary' : 'inst-btn-secondary'}`}
+                  onClick={() => setImportMode('file')}
+                >
+                  <FileSpreadsheet size={13} /> CSV / Excel
+                </button>
+                <button
+                  className={`inst-btn inst-btn-sm ${importMode === 'pdf' ? 'inst-btn-primary' : 'inst-btn-secondary'}`}
+                  onClick={() => setImportMode('pdf')}
+                >
+                  <FileText size={13} /> Extract from PDF
+                </button>
+              </div>
+
+              {importMode === 'file' && (
+              <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={downloadTemplate}>
+                  <Download size={13} /> Download template
+                </button>
+              </div>
+
+              <div
+                onClick={() => fileRef.current.click()}
+                style={{ border: '2px dashed var(--inst-border-dark)', borderRadius: 'var(--inst-radius-lg)', padding: '32px 24px', textAlign: 'center', cursor: 'pointer', background: 'var(--inst-bg)', marginBottom: 20 }}
+              >
+                <FileSpreadsheet size={32} style={{ color: 'var(--inst-text-muted)', marginBottom: 10 }} />
+                <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--inst-text)', margin: '0 0 4px' }}>
+                  {importFileName || 'Click to upload CSV or Excel file'}
+                </p>
+                <p style={{ fontSize: 12, color: 'var(--inst-text-muted)', margin: 0 }}>
+                  Accepts .csv, .xlsx, .xls — use the template above for correct columns
+                </p>
+                <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={handleFileSelect} />
+              </div>
+
+              {importing && (
+                <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--inst-text-muted)', fontSize: 13 }}>
+                  Parsing file...
+                </div>
+              )}
+
+              {importResults && (
+                <div>
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                    <span className="inst-badge inst-badge-success"><CheckCircle size={11} /> {importResults.valid.length} valid</span>
+                    {importResults.errors.length > 0 && (
+                      <span className="inst-badge inst-badge-danger"><AlertCircle size={11} /> {importResults.errors.length} skipped</span>
+                    )}
+                  </div>
+
+                  {importResults.valid.length > 0 && (
+                    <div style={{ border: '1px solid var(--inst-border)', borderRadius: 'var(--inst-radius)', overflow: 'hidden', maxHeight: 200, overflowY: 'auto', marginBottom: 12 }}>
+                      {importResults.valid.slice(0, 25).map((q, i) => (
+                        <div key={i} style={{ padding: '10px 16px', borderBottom: '1px solid var(--inst-border)', fontSize: 13 }}>
+                          <div style={{ fontWeight: 600, color: 'var(--inst-text)', marginBottom: 4 }}>{i + 1}. {q.question}</div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <span className={CATEGORY_BADGE[q.category]}>{q.category}</span>
+                            <span className={DIFFICULTY_BADGE[q.difficulty]}>{q.difficulty}</span>
+                            {q.subject && <span style={{ fontSize: 11, color: 'var(--inst-text-muted)' }}>{q.subject}</span>}
+                          </div>
+                        </div>
+                      ))}
+                      {importResults.valid.length > 25 && (
+                        <div style={{ padding: '8px 16px', fontSize: 12, color: 'var(--inst-text-muted)' }}>
+                          + {importResults.valid.length - 25} more not shown
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {importResults.errors.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--inst-danger)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
+                        Skipped rows
+                      </div>
+                      <div style={{ border: '1px solid var(--inst-border)', borderRadius: 'var(--inst-radius)', overflow: 'hidden', maxHeight: 160, overflowY: 'auto' }}>
+                        {importResults.errors.map((e, i) => (
+                          <div key={i} style={{ padding: '8px 16px', borderBottom: '1px solid var(--inst-border)', fontSize: 12 }}>
+                            <strong>Row {e.rowNumber}:</strong> {e.preview} — {e.errors.join('; ')}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              </>
+              )}
+
+              {importMode === 'pdf' && (
+              <>
+                <div style={{ padding: '10px 14px', background: 'var(--inst-amber-soft, #fff7ed)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, fontSize: 12, color: 'var(--inst-text-sub)', marginBottom: 16, lineHeight: 1.5 }}>
+                  ⚠️ Works best for reviewers formatted as: numbered questions with A–D choices, followed by an answer key section (e.g. "1. B. Progressivism" + "Rationale: ..."). Always check the preview below before importing.
+                </div>
+
+                <div
+                  onClick={() => pdfRef.current.click()}
+                  style={{ border: '2px dashed var(--inst-border-dark)', borderRadius: 'var(--inst-radius-lg)', padding: '32px 24px', textAlign: 'center', cursor: 'pointer', background: 'var(--inst-bg)', marginBottom: 16 }}
+                >
+                  <FileText size={32} style={{ color: 'var(--inst-text-muted)', marginBottom: 10 }} />
+                  <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--inst-text)', margin: '0 0 4px' }}>
+                    {pdfFileName || 'Click to upload a PDF'}
+                  </p>
+                  <p style={{ fontSize: 12, color: 'var(--inst-text-muted)', margin: 0 }}>
+                    Text-based PDFs only (not scanned images)
+                  </p>
+                  <input ref={pdfRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={handlePdfSelect} />
+                </div>
+
+                {pdfExtracting && (
+                  <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--inst-text-muted)', fontSize: 13 }}>
+                    Reading and parsing PDF...
+                  </div>
+                )}
+
+                {pdfParsed && !pdfExtracting && (
+                  <div>
+                    <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+                      <span className="inst-badge inst-badge-success"><CheckCircle size={11} /> {pdfParsed.valid.length} detected</span>
+                      {pdfParsed.errors.length > 0 && (
+                        <span className="inst-badge inst-badge-danger"><AlertCircle size={11} /> {pdfParsed.errors.length} need review</span>
+                      )}
+                      {!pdfParsed.keyFound && (
+                        <span className="inst-badge inst-badge-danger"><AlertCircle size={11} /> No "Answer Key" section found</span>
+                      )}
+                    </div>
+
+                    {pdfParsed.valid.length > 0 && (
+                      <div className="inst-three-col" style={{ marginBottom: 16 }}>
+                        <div className="inst-form-group" style={{ marginBottom: 0 }}>
+                          <label className="inst-form-label">Category <span className="inst-form-label-sub">· applied to all</span></label>
+                          <select className="inst-form-select" value={pdfCategory} onChange={(e) => setPdfCategory(e.target.value)}>
+                            <option value="GenEd">GenEd</option>
+                            <option value="ProfEd">ProfEd</option>
+                            <option value="Major">Major</option>
+                          </select>
+                        </div>
+                        <div className="inst-form-group" style={{ marginBottom: 0 }}>
+                          <label className="inst-form-label">Subject <span className="inst-form-label-sub">· optional</span></label>
+                          <input className="inst-form-input" placeholder="e.g. Professional Education" value={pdfSubject} onChange={(e) => setPdfSubject(e.target.value)} />
+                        </div>
+                        <div className="inst-form-group" style={{ marginBottom: 0 }}>
+                          <label className="inst-form-label">Difficulty</label>
+                          <select className="inst-form-select" value={pdfDifficulty} onChange={(e) => setPdfDifficulty(e.target.value)}>
+                            <option value="Easy">Easy</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Hard">Hard</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {pdfParsed.valid.length > 0 && (
+                      <div style={{ border: '1px solid var(--inst-border)', borderRadius: 'var(--inst-radius)', overflow: 'hidden', maxHeight: 260, overflowY: 'auto', marginBottom: 12 }}>
+                        {pdfParsed.valid.slice(0, 25).map((q, i) => (
+                          <div key={i} style={{ padding: '10px 16px', borderBottom: '1px solid var(--inst-border)', fontSize: 12.5 }}>
+                            <div style={{ fontWeight: 600, color: 'var(--inst-text)', marginBottom: 6 }}>{i + 1}. {q.question}</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 6 }}>
+                              {q.choices.map((c, ci) => (
+                                <span key={ci} style={{ color: ci === q.answer ? 'var(--inst-accent, #16a34a)' : 'var(--inst-text-sub)', fontWeight: ci === q.answer ? 700 : 400 }}>
+                                  {String.fromCharCode(65 + ci)}. {c} {ci === q.answer ? '✓' : ''}
+                                </span>
+                              ))}
+                            </div>
+                            {q.explanation && (
+                              <div style={{ fontSize: 11.5, color: 'var(--inst-text-muted)', fontStyle: 'italic' }}>{q.explanation}</div>
+                            )}
+                          </div>
+                        ))}
+                        {pdfParsed.valid.length > 25 && (
+                          <div style={{ padding: '8px 16px', fontSize: 12, color: 'var(--inst-text-muted)' }}>
+                            + {pdfParsed.valid.length - 25} more not shown
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {pdfParsed.errors.length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--inst-danger)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
+                          Skipped — need manual entry
+                        </div>
+                        <div style={{ border: '1px solid var(--inst-border)', borderRadius: 'var(--inst-radius)', overflow: 'hidden', maxHeight: 160, overflowY: 'auto' }}>
+                          {pdfParsed.errors.map((e, i) => (
+                            <div key={i} style={{ padding: '8px 16px', borderBottom: '1px solid var(--inst-border)', fontSize: 12 }}>
+                              <strong>Item {e.number}:</strong> {e.preview}… — {e.errors.join('; ')}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      className="inst-btn inst-btn-secondary inst-btn-sm"
+                      onClick={() => setShowPdfRaw((v) => !v)}
+                      style={{ marginBottom: showPdfRaw ? 10 : 0 }}
+                    >
+                      {showPdfRaw ? 'Hide' : 'Show'} raw extracted text
+                    </button>
+
+                    {showPdfRaw && (
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                          <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={handleCopyPdfText}>
+                            {pdfCopied ? <><ClipboardCheck size={13} /> Copied</> : <><Copy size={13} /> Copy all</>}
+                          </button>
+                        </div>
+                        <textarea
+                          readOnly
+                          value={pdfRawText}
+                          style={{
+                            width: '100%', boxSizing: 'border-box', minHeight: 200, maxHeight: 300,
+                            padding: 12, borderRadius: 'var(--inst-radius)', border: '1px solid var(--inst-border)',
+                            fontSize: 12, fontFamily: 'ui-monospace, monospace', color: 'var(--inst-text)',
+                            background: 'var(--inst-bg)', resize: 'vertical', lineHeight: 1.6,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+              )}
+            </div>
+            <div className="inst-modal-footer">
+              <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={closeImport}>Cancel</button>
+              {importMode === 'file' && importResults?.valid.length > 0 && (
+                <button className="inst-btn inst-btn-primary inst-btn-sm" onClick={handleConfirmImport}>
+                  <CheckCircle size={13} /> Import {importResults.valid.length} Questions
+                </button>
+              )}
+              {importMode === 'pdf' && pdfParsed?.valid.length > 0 && (
+                <button className="inst-btn inst-btn-primary inst-btn-sm" onClick={handleConfirmPdfImport}>
+                  <CheckCircle size={13} /> Import {pdfParsed.valid.length} Questions
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
