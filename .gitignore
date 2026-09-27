@@ -5,6 +5,7 @@ backend/**/__pycache__/
 backend/**/*.pyc
 backend/media/
 backend/db.sqlite3
+backend/*.dump
 
 # Frontend
 frontend/node_modules/

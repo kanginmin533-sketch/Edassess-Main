@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, FileText, ShieldCheck,
@@ -7,19 +8,35 @@ import useAuthStore from '../../auth/useAuthStore';
 import authApi from '../../api/authApi';
 import './admin.css';
 
+// Bawat nav item, konektado sa permission key na nagpapakita/nagtatago nito.
+// permKey: null = laging bisible, walang toggle na naka-tie dito.
 const NAV_ITEMS = [
-  { to: '/admin',         label: 'Dashboard',       icon: LayoutDashboard, end: true },
-  { to: '/admin/users',   label: 'Users',            icon: Users },
-  { to: '/admin/exams',   label: 'Exam Config',      icon: FileText },
-  { to: '/admin/modules', label: 'Review Modules',   icon: FolderOpen },
-  { to: '/admin/access',  label: 'Access Control',   icon: ShieldCheck },
-  { to: '/admin/reports', label: 'Reports',          icon: BarChart2 },
-  { to: '/admin/settings',label: 'Settings',         icon: Settings },
+  { to: '/admin',         label: 'Dashboard',       icon: LayoutDashboard, end: true, permKey: 'viewDashboard' },
+  { to: '/admin/users',   label: 'Users',            icon: Users,          permKey: 'manageUsers' },
+  { to: '/admin/exams',   label: 'Exam Config',      icon: FileText,       permKey: 'configureExams' },
+  { to: '/admin/modules', label: 'Review Modules',   icon: FolderOpen,     permKey: 'viewReviewModules' },
+  { to: '/admin/access',  label: 'Access Control',   icon: ShieldCheck,    permKey: 'manageAccess' },
+  { to: '/admin/reports', label: 'Reports',          icon: BarChart2,      permKey: 'viewReports' },
+  { to: '/admin/settings',label: 'Settings',         icon: Settings,       permKey: 'manageSettings' },
 ];
 
 export default function AdminLayout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const [perms, setPerms] = useState(null); // null = loading pa; {} = walang laman
+
+  useEffect(() => {
+    async function loadPerms() {
+      try {
+        const data = await authApi.getMyPermissions();
+        setPerms(data || {});
+      } catch (err) {
+        console.error('Failed to load permissions:', err);
+        setPerms({}); // fail-safe: itago lahat ng may permKey kung hindi na-fetch
+      }
+    }
+    loadPerms();
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -35,6 +52,14 @@ export default function AdminLayout() {
   const initials = user?.name
     ? user.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
     : 'AD';
+
+  // Habang loading pa ang perms, ituring munang bisible lahat (avoid flash-of-empty-sidebar);
+  // pagkatapos, itago lang ang mga may permKey na naka-off.
+  const visibleNavItems = NAV_ITEMS.filter(({ permKey }) => {
+    if (!permKey) return true;
+    if (perms === null) return true;
+    return perms[permKey] !== false;
+  });
 
   return (
     <div className="admin-shell">
@@ -55,7 +80,7 @@ export default function AdminLayout() {
         <div className="sidebar-section">
           <div className="sidebar-section-label">Main Menu</div>
           <ul className="sidebar-nav">
-            {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+            {visibleNavItems.map(({ to, label, icon: Icon, end }) => (
               <li key={to}>
                 <NavLink
                   to={to}

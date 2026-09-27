@@ -4,12 +4,8 @@ import { AlertTriangle, Flag, ChevronLeft, ChevronRight, Send, X, Clock } from '
 import useQuestionBank from '../../hooks/useQuestionBank';
 import { examApi } from '../../api/examApi';
 
-// Maps the route-level examType to the category stored in the question bank
 const CATEGORY_MAP = { gened: 'GenEd', profed: 'ProfEd', major: 'Major' };
 
-// How many question numbers to show per page in the navigator sidebar.
-// Prevents the grid from becoming a huge unreadable wall of buttons on
-// 150-item LET simulations.
 const NAV_PAGE_SIZE = 25;
 
 function shuffle(arr) {
@@ -21,7 +17,6 @@ function shuffle(arr) {
   return a;
 }
 
-// ── Warning Thresholds (in seconds) ──────────────────────────────────────
 const WARNINGS = [
   { at: 30 * 60, label: '⚠️ 30 minutes remaining!',  shown: false },
   { at: 10 * 60, label: '⚠️ 10 minutes remaining!',  shown: false },
@@ -33,10 +28,8 @@ export default function ExamPage() {
   const navigate  = useNavigate();
   const state     = location.state;
 
-  // Read-only access to the real question bank
   const { questions: bank, loading: bankLoading } = useQuestionBank();
 
-  // ── Guard: redirect if no state ──────────────────────────────────────────
   useEffect(() => {
     if (!state) navigate('/dashboard/selection', { replace: true });
   }, [state, navigate]);
@@ -49,28 +42,28 @@ export default function ExamPage() {
     totalItems  = 20,
     durationMin = 120,
     color       = 'green',
+    shuffleQuestions = true,
   } = state || {};
 
   // ── State ─────────────────────────────────────────────────────────────────
-  // Fetches the SPECIFIC exam (with instructor-curated questions) by examId,
-  // passed from ExamSelectionPage. Falls back to a random category pull only
-  // if no examId was provided (shouldn't normally happen).
   const [questions, setQuestions] = useState([]);
-  const [questionsReady, setQuestionsReady] = useState(false);
+  const [questionsReady, setQuestionsReady] = useState(false); // ← nawala, na-restore
 
   useEffect(() => {
     async function loadQuestions() {
       if (examId) {
         try {
           const exam = await examApi.getExamById(examId);
-          setQuestions(exam.questions.map((q) => ({
+          const mapped = exam.questions.map((q) => ({
             id: q.id,
             question: q.question,
             choices: q.choices,
             answer: q.answer,
             subject: q.subject || q.category,
             explanation: q.explanation,
-          })));
+            choice_explanations: q.choice_explanations,
+          }));
+          setQuestions(shuffleQuestions ? shuffle(mapped) : mapped);
         } catch (err) {
           console.error('Failed to load exam:', err);
         } finally {
@@ -79,7 +72,6 @@ export default function ExamPage() {
         return;
       }
 
-      // Fallback: no examId — pull randomly from the category (legacy path)
       if (bankLoading) return;
       const category = CATEGORY_MAP[examType] || 'GenEd';
       const pool = bank.filter((q) => q.category === category);
@@ -91,6 +83,7 @@ export default function ExamPage() {
         answer: q.answer,
         subject: q.subject || q.category,
         explanation: q.explanation,
+        choice_explanations: q.choice_explanations,
       })));
       setQuestionsReady(true);
     }
@@ -112,16 +105,15 @@ export default function ExamPage() {
 
   // ── Timer ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!questionsReady) return; // don't start the countdown before questions exist
+    if (!questionsReady) return;
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          handleSubmit(true); // Auto-submit
+          handleSubmit(true);
           return 0;
         }
 
-        // Check warning thresholds
         warningsRef.current.forEach((w) => {
           if (!w.shown && prev <= w.at + 1 && prev >= w.at) {
             w.shown = true;
@@ -136,20 +128,16 @@ export default function ExamPage() {
     return () => clearInterval(interval);
   }, [questionsReady]);
 
-  // Keep the navigator's visible page in sync with the current question,
-  // e.g. jumping from #25 to #26 auto-advances the navigator to the next page.
   useEffect(() => {
     setNavPage(Math.floor(current / NAV_PAGE_SIZE));
   }, [current]);
 
-  // ── Toast helper ──────────────────────────────────────────────────────────
   const showToast = (msg) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 8000);
   };
 
-  // ── Format time ───────────────────────────────────────────────────────────
   const formatTime = (secs) => {
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);
@@ -165,7 +153,6 @@ export default function ExamPage() {
     ? 'exam-timer warning'
     : 'exam-timer normal';
 
-  // ── Answer / Flag ─────────────────────────────────────────────────────────
   const handleAnswer = (choiceIdx) => {
     setAnswers((prev) => ({ ...prev, [current]: choiceIdx }));
   };
@@ -178,7 +165,6 @@ export default function ExamPage() {
     });
   };
 
-  // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(async (autoSubmit = false) => {
     if (submitting) return;
     setSubmitting(true);
@@ -191,7 +177,6 @@ export default function ExamPage() {
     const timeTaken = durationMin * 60 - timeLeft;
     const category = CATEGORY_MAP[examType] || 'GenEd';
 
-    // Per-subject breakdown, e.g. { Mathematics: { correct: 8, total: 15 }, ... }
     const subjectBreakdown = questions.reduce((acc, q, i) => {
       const subj = q.subject || 'General';
       if (!acc[subj]) acc[subj] = { correct: 0, total: 0 };
@@ -217,8 +202,6 @@ export default function ExamPage() {
       });
     } catch (err) {
       console.error('Failed to save exam attempt:', err);
-      // Continue to results even if the save fails — the student shouldn't
-      // lose their completed exam just because of a network hiccup.
     }
 
     navigate(savedAttempt ? `/dashboard/results/${savedAttempt.id}` : '/dashboard/results', {
@@ -273,7 +256,6 @@ export default function ExamPage() {
   return (
     <div className="exam-shell">
 
-      {/* ── Warning Toast ── */}
       {toast && (
         <div className="exam-warning-toast">
           <AlertTriangle size={18} />
@@ -284,14 +266,12 @@ export default function ExamPage() {
         </div>
       )}
 
-      {/* ── Header ── */}
       <div className="exam-header">
         <div className="exam-header-left">
           <span className="exam-header-title">{label} — LET Simulation</span>
           <span className="exam-header-sub">{answered} of {questions.length} answered</span>
         </div>
 
-        {/* Timer */}
         <div className={timerClass}>
           <Clock size={18} />
           {formatTime(timeLeft)}
@@ -306,10 +286,8 @@ export default function ExamPage() {
         </button>
       </div>
 
-      {/* ── Body ── */}
       <div className="exam-body">
 
-        {/* Question Navigator */}
         <div className="exam-nav-panel">
           <div className="exam-nav-title">Questions</div>
 
@@ -372,11 +350,9 @@ export default function ExamPage() {
           </div>
         </div>
 
-        {/* Question Card */}
         <div className="exam-question-area">
           <div className="exam-q-card">
 
-            {/* Progress Bar */}
             <div className="exam-q-header">
               <span className="exam-q-number">Question {current + 1} of {questions.length}</span>
               <div className="exam-q-progress-bar">
@@ -385,11 +361,9 @@ export default function ExamPage() {
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--user-text-muted)' }}>{Math.round(progress)}%</span>
             </div>
 
-            {/* Question Text */}
             <div className="exam-q-body">
               <p className="exam-q-text">{q.question}</p>
 
-              {/* Choices */}
               <div className="exam-choices">
                 {q.choices.map((choice, i) => (
                   <div
@@ -406,7 +380,6 @@ export default function ExamPage() {
               </div>
             </div>
 
-            {/* Footer Nav */}
             <div className="exam-q-footer">
               <button
                 className="exam-btn exam-btn-secondary"
@@ -444,7 +417,6 @@ export default function ExamPage() {
         </div>
       </div>
 
-      {/* ── Confirm Submit Modal ── */}
       {showConfirm && (
         <div className="inst-modal-backdrop" onClick={() => setShowConfirm(false)}>
           <div className="inst-modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>

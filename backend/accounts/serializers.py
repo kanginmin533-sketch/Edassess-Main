@@ -9,7 +9,7 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'name', 'email', 'role', 'date_joined', 'is_active']
+        fields = ['id', 'name', 'email', 'role', 'department', 'date_joined', 'is_active']
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -32,9 +32,10 @@ class RegisterSerializer(serializers.Serializer):
     def create(self, validated_data):
         return User.objects.create_user(
             email=validated_data['email'],
-            name=validated_data['full_name'],
+            name=validated_data['name'],
             password=validated_data['password'],
-            role=User.ROLE_STUDENT,
+            role=validated_data['role'],
+            department=validated_data.get('department'),
         )
 
 
@@ -48,6 +49,9 @@ class AdminCreateUserSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
     role = serializers.ChoiceField(choices=[User.ROLE_INSTRUCTOR, User.ROLE_ADMIN, User.ROLE_STUDENT])
+    department = serializers.ChoiceField(
+        choices=User.DEPARTMENT_CHOICES, required=False, allow_null=True, default=None
+    )
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
@@ -57,6 +61,14 @@ class AdminCreateUserSerializer(serializers.Serializer):
     def validate_password(self, value):
         validate_password(value)
         return value
+
+    def validate(self, attrs):
+        # Department is required for instructors, and only makes sense for them.
+        if attrs.get('role') == User.ROLE_INSTRUCTOR and not attrs.get('department'):
+            raise serializers.ValidationError({'department': 'Department (CIT or CTE) is required for instructors.'})
+        if attrs.get('role') != User.ROLE_INSTRUCTOR:
+            attrs['department'] = None
+        return attrs
 
     def create(self, validated_data):
         return User.objects.create_user(

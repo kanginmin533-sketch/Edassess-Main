@@ -1,3 +1,4 @@
+// 📁 frontend/src/pages/user/ResultsPage.jsx
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { CheckCircle, XCircle, RotateCcw, Home, Clock, TrendingDown, BookOpen, Download } from 'lucide-react';
@@ -268,13 +269,13 @@ export default function ResultsPage() {
             </div>
           </div>
 
-          {/* Right — Answer Key + Explanations */}
+                    {/* Right — Answer Key + Explanations */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="user-card">
               <div className="user-card-header">
                 <div>
                   <h3>Answer Key & Explanations</h3>
-                  <p>All {questions.length} questions — correct answers and rationale</p>
+                  <p>All {questions.length} questions — every choice explained</p>
                 </div>
                 <TrendingDown size={16} style={{ color: 'var(--user-danger)' }} />
               </div>
@@ -284,6 +285,7 @@ export default function ResultsPage() {
                   const userAnswer    = answers[i];
                   const isCorrect     = userAnswer === q.answer;
                   const isUnanswered  = userAnswer === undefined;
+                  const choiceExps    = q.choice_explanations || [];
 
                   return (
                     <div key={q.id} style={{
@@ -307,37 +309,69 @@ export default function ResultsPage() {
                         </p>
                       </div>
 
-                      {/* Answer comparison */}
-                      <div style={{ marginLeft: 32, display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 10 }}>
-                        {!isUnanswered && !isCorrect && (
-                          <div style={{ fontSize: 12, color: 'var(--user-danger)', background: 'var(--user-danger-soft)', padding: '4px 10px', borderRadius: 6, display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                            <XCircle size={12} /> Your answer: <strong>{q.choices[userAnswer]}</strong>
-                          </div>
-                        )}
-                        {isUnanswered && (
-                          <div style={{ fontSize: 12, color: 'var(--user-amber)', background: 'var(--user-amber-soft)', padding: '4px 10px', borderRadius: 6, display: 'inline-flex', gap: 6 }}>
-                            ⚠️ Not answered
-                          </div>
-                        )}
-                        <div style={{ fontSize: 12, color: 'var(--user-accent)', background: 'var(--user-accent-soft)', padding: '4px 10px', borderRadius: 6, display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                          <CheckCircle size={12} /> Correct answer: <strong>{q.choices[q.answer]}</strong>
-                        </div>
-                      </div>
-
-                      {/* Explanation */}
-                      {q.explanation && (
-                        <div style={{ marginLeft: 32, padding: '10px 14px', background: 'var(--user-bg)', borderRadius: 8, border: '1px solid var(--user-border)', borderLeft: '3px solid var(--user-blue)' }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--user-blue)', marginBottom: 4 }}>Explanation</div>
-                          <p style={{ fontSize: 12.5, color: 'var(--user-text-sub)', margin: 0, lineHeight: 1.6 }}>{q.explanation}</p>
+                      {isUnanswered && (
+                        <div style={{ marginLeft: 32, marginBottom: 10, fontSize: 12, color: 'var(--user-amber)', background: 'var(--user-amber-soft)', padding: '4px 10px', borderRadius: 6, display: 'inline-flex', gap: 6 }}>
+                          ⚠️ Not answered
                         </div>
                       )}
+
+                      {/* Every choice, each with its own explanation */}
+                      <div style={{ marginLeft: 32, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {q.choices.map((choiceText, ci) => {
+                          const isTheCorrect = ci === q.answer;
+                          const isThePicked  = ci === userAnswer;
+                          const exp = (choiceExps[ci] || '').trim();
+
+                          const borderColor = isTheCorrect
+                            ? 'var(--user-accent)'
+                            : isThePicked
+                            ? 'var(--user-danger)'
+                            : 'var(--user-border)';
+
+                          return (
+                            <div
+                              key={ci}
+                              style={{
+                                padding: '10px 14px',
+                                background: 'var(--user-bg)',
+                                borderRadius: 8,
+                                border: '1px solid var(--user-border)',
+                                borderLeft: `3px solid ${borderColor}`,
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: exp ? 5 : 0, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--user-text)' }}>
+                                  {String.fromCharCode(65 + ci)}. {choiceText}
+                                </span>
+                                {isTheCorrect && (
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--user-accent)', background: 'var(--user-accent-soft)', padding: '2px 8px', borderRadius: 10 }}>
+                                    ✓ Correct answer
+                                  </span>
+                                )}
+                                {isThePicked && !isTheCorrect && (
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--user-danger)', background: 'var(--user-danger-soft)', padding: '2px 8px', borderRadius: 10 }}>
+                                    Your answer
+                                  </span>
+                                )}
+                              </div>
+                              {exp ? (
+                                <p style={{ fontSize: 12.5, color: 'var(--user-text-sub)', margin: 0, lineHeight: 1.6 }}>{exp}</p>
+                              ) : isTheCorrect && q.explanation ? (
+                                // Fallback to the old single overall explanation
+                                // for older attempts saved before per-choice
+                                // explanations existed.
+                                <p style={{ fontSize: 12.5, color: 'var(--user-text-sub)', margin: 0, lineHeight: 1.6 }}>{q.explanation}</p>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })}
               </div>
             </div>
           </div>
-
         </div>
       </div>
     </>

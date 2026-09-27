@@ -5,7 +5,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from accounts.permissions import IsInstructor
+from accounts.permissions import IsInstructor, CanViewReports, CanViewDashboard
 from exams.models import Exam, ExamAttempt
 
 User = get_user_model()
@@ -24,7 +24,7 @@ def relative_time(ts, now):
 
 class AdminDashboardView(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAdminUser, CanViewDashboard]
 
     def get(self, request):
         now = timezone.now()
@@ -96,7 +96,7 @@ class AdminDashboardView(APIView):
 class AdminReportsView(APIView):
     """Read-only aggregation ng ExamAttempt records — powers ang ReportsPage."""
     authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [permissions.IsAdminUser, CanViewReports]
 
     def get(self, request):
         attempts = ExamAttempt.objects.all()
@@ -146,11 +146,12 @@ class AdminReportsView(APIView):
             'summary': summary,
             'exam_stats': exam_rows,
         }, status=status.HTTP_200_OK)
-        
+
+
 class StudentMonitorView(APIView):
     """Per-student scores/attempts + class-wide weak areas — powers StudentMonitorPage."""
     authentication_classes = [JWTAuthentication]
-    permission_classes = [IsInstructor]
+    permission_classes = [IsInstructor, CanViewReports]
 
     def get(self, request):
         # Only look at students who attempted exams in this instructor's categories

@@ -6,7 +6,10 @@ from .views import (
     MeView,
     AdminUserListView,
     AdminCreateUserView,
+    AdminUserDetailView,
+    AdminUserStatusView,
     RolePermissionView,
+    MyPermissionsView,
     SystemSettingsView,
 )
 
@@ -25,9 +28,18 @@ urlpatterns = [
     path('admin/users/create', AdminCreateUserView.as_view(), name='admin-user-create'),
     path('admin/users/create/', AdminCreateUserView.as_view()),
 
+    path('admin/users/<int:pk>/update', AdminUserDetailView.as_view(), name='admin-user-update'),
+    path('admin/users/<int:pk>/update/', AdminUserDetailView.as_view()),
+    path('admin/users/<int:pk>/delete', AdminUserDetailView.as_view(), name='admin-user-delete'),
+    path('admin/users/<int:pk>/delete/', AdminUserDetailView.as_view()),
+    path('admin/users/<int:pk>/status', AdminUserStatusView.as_view(), name='admin-user-status'),
+    path('admin/users/<int:pk>/status/', AdminUserStatusView.as_view()),
+
     path('admin/role-permissions', RolePermissionView.as_view(), name='role-permissions'),
     path('admin/role-permissions/', RolePermissionView.as_view()),
-    
+    path('auth/my-permissions', MyPermissionsView.as_view(), name='my-permissions'),
+    path('auth/my-permissions/', MyPermissionsView.as_view()),
+
     path('admin/settings', SystemSettingsView.as_view(), name='system-settings'),
     path('admin/settings/', SystemSettingsView.as_view()),
 ]

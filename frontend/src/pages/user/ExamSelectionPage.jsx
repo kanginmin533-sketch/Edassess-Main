@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Clock, FileText, Zap, ChevronRight } from 'lucide-react';
 import { examApi } from '../../api/examApi';
+import useAuthStore from '../../auth/useAuthStore';
 
 const EXAM_TYPES = [
   {
@@ -47,6 +48,7 @@ const EXAM_TYPES = [
 
 export default function ExamSelectionPage() {
   const navigate = useNavigate();
+  const { user } = useAuthStore(); // ← bago
   const [activeExams, setActiveExams] = useState([]);
   const [fetching, setFetching] = useState(true);
 
@@ -66,16 +68,24 @@ export default function ExamSelectionPage() {
 
   const CATEGORY_MAP = { gened: 'GenEd', profed: 'ProfEd', major: 'Major' };
 
+  // Major exams dapat tumugma sa department ng student; GenEd/ProfEd shared sa lahat.
+  const findMatchingExam = (category) => {
+    return activeExams.find((e) => {
+      if (e.category !== category) return false;
+      if (category === 'Major') return e.department === user?.department;
+      return true;
+    });
+  };
+
   const handleStart = (exam) => {
     const category = CATEGORY_MAP[exam.id];
-    const matchingExam = activeExams.find((e) => e.category === category);
+    const matchingExam = findMatchingExam(category);
 
     if (!matchingExam) {
       alert(`No active ${exam.label} exam has been published yet. Please check with your instructor.`);
       return;
     }
 
-    // Pass exam config via location state
     navigate('/dashboard/exam', {
       state: {
         examId:      matchingExam.id,
@@ -132,7 +142,7 @@ export default function ExamSelectionPage() {
           {EXAM_TYPES.map((exam) => {
             const Icon = exam.icon;
             const category = CATEGORY_MAP[exam.id];
-            const matchingExam = activeExams.find((e) => e.category === category);
+            const matchingExam = findMatchingExam(category); // ← palitan mula sa dating inline .find()
             return (
               <div className="exam-sel-card" key={exam.id}>
                 <div className="exam-sel-card-top">

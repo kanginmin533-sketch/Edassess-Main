@@ -51,6 +51,7 @@ import {
 // ── User / Student Pages ───────────────────────────────────────────────────
 import {
   UserLayout,
+  CitUserLayout,
   UserDashboard,
   UserAssessmentsPage,
   ResultsPage,
@@ -66,6 +67,15 @@ function ScrollToTop() {
     window.scrollTo(0, 0);
   }, [pathname]);
   return null;
+}
+
+// ── Department-aware student layout switch ─────────────────────────────────
+// RoleGuard sa taas nito ay nag-che-check lang ng role ('user'). Dito naman
+// dine-decide kung aling shell/sidebar ang ipapakita batay sa department —
+// parehong routes/pages pa rin sa ilalim, iba lang ang layout.
+function StudentDashboardRouter() {
+  const { user } = useAuthStore();
+  return user?.department === 'CIT' ? <CitUserLayout /> : <UserLayout />;
 }
 
 // ── Public Landing Page ────────────────────────────────────────────────────
@@ -151,7 +161,7 @@ export default function App() {
           element={
             <ProtectedRoute>
               <RoleGuard role="user">
-                <UserLayout />
+                <StudentDashboardRouter />
               </RoleGuard>
             </ProtectedRoute>
           }

@@ -1,147 +1,94 @@
-.platform-section {
-  background: var(--sand);
-  padding: 96px 0;
-}
+/* 📁 frontend/src/styles/PlatformSection.css */
+
+.platform-section { padding: 90px 0; background: var(--paper); }
 
 .platform-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 56px;
-  align-items: center;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 70px;
+  align-items: start;
 }
 
-.platform-features {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin-top: 40px;
-}
+.platform-features { display: grid; gap: 26px; margin-top: 36px; }
 
-.feature-item {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
-  padding: 22px 0;
-  border-bottom: 1px solid var(--rule);
-}
-
-.feature-item:first-child {
-  border-top: 1px solid var(--rule);
-}
+.feature-item { display: flex; gap: 16px; }
 
 .feature-icon {
-  width: 36px;
-  height: 36px;
   flex-shrink: 0;
-  background: var(--navy);
-  border-radius: 4px;
+  width: 40px;
+  height: 40px;
+  background: var(--blue-light);
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-
 .feature-icon svg {
-  width: 16px;
-  height: 16px;
-  stroke: var(--gold);
+  width: 18px;
+  height: 18px;
   fill: none;
+  stroke: var(--blue);
   stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .feature-body h4 {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--navy);
-  margin-bottom: 4px;
+  font-family: var(--font-sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 4px;
 }
-
 .feature-body p {
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  color: var(--slate);
+  line-height: 1.55;
+  margin: 0;
 }
 
-/* Visual panel */
 .platform-visual {
-  background: var(--navy-deep);
-  border-radius: 8px;
-  padding: 48px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+  background: linear-gradient(155deg, var(--navy) 0%, var(--navy-deep) 100%);
+  border-radius: 16px;
+  padding: 30px 28px;
+  color: #fff;
 }
 
 .pv-label {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--gold);
-  font-weight: 500;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 1rem;
+  color: var(--amber);
+  margin-bottom: 12px;
 }
 
-.pv-divider {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-}
+.pv-divider { height: 1px; background: rgba(255,255,255,0.14); margin: 16px 0; }
 
 .pv-row {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  font-size: 13px;
+  font-family: var(--font-sans);
+  font-size: 0.86rem;
+  padding: 6px 0;
 }
+.pv-row span:first-child { color: rgba(255,255,255,0.55); }
+.pv-row span:last-child { color: #fff; font-weight: 500; text-align: right; }
 
-.pv-row span:first-child {
-  color: rgba(255, 255, 255, 0.45);
-}
+.pv-status { color: var(--teal) !important; }
 
-.pv-row span:last-child {
-  color: var(--white);
-  font-weight: 400;
-}
-
-.pv-status {
-  color: var(--gold) !important;
-}
-
-.pv-bar-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
+.pv-bar-wrap { margin-bottom: 16px; }
 .pv-bar-label {
   display: flex;
   justify-content: space-between;
-  font-size: 11.5px;
-  margin-bottom: 8px;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.6);
+  margin-bottom: 6px;
+}
+.pv-bar-track { height: 6px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+.pv-bar-fill { height: 100%; background: var(--amber); border-radius: 3px; }
+
+@media (max-width: 860px) {
+  .platform-row { grid-template-columns: 1fr; gap: 44px; }
 }
 
-.pv-bar-label span:first-child {
-  color: rgba(255, 255, 255, 0.4);
-}
-
-.pv-bar-label span:last-child {
-  color: var(--gold);
-}
-
-.pv-bar-track {
-  height: 4px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.pv-bar-fill {
-  height: 100%;
-  background: var(--gold);
-  border-radius: 2px;
-}
-
-@media (max-width: 900px) {
-  .platform-row {
-    grid-template-columns: 1fr;
-  }
-}
+.feature-item { display: flex; gap: 16px; align-items: flex-start; }

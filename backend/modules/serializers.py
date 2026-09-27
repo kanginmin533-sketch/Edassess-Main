@@ -15,11 +15,11 @@ class ModuleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Module
         fields = [
-            'id', 'title', 'description', 'category', 'file',
+            'id', 'title', 'description', 'category', 'department', 'file',
             'fileName', 'fileSize', 'fileType', 'fileUrl',
             'uploadedBy', 'uploadedAt',
         ]
-        extra_kwargs = {'file': {'write_only': True}}
+        extra_kwargs = {'file': {'write_only': True}, 'department': {'read_only': True}}
 
     def get_fileName(self, obj):
         return obj.file_name
@@ -39,7 +39,8 @@ class ModuleSerializer(serializers.ModelSerializer):
 
     def get_uploadedBy(self, obj):
         return obj.uploaded_by.name if obj.uploaded_by else 'Unknown'
-    
+
+
 class AnnouncementSerializer(serializers.ModelSerializer):
     date = serializers.SerializerMethodField()
 

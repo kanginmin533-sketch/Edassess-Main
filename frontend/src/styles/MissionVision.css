@@ -1,94 +1,58 @@
-.mv-section {
-  background: var(--white);
-  padding: 96px 0;
-}
+/* 📁 frontend/src/styles/MissionVision.css */
+
+.mv-section { padding: 90px 0; background: var(--paper-tint); }
 
 .mv-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-top: 56px;
+  gap: 24px;
+  margin-top: 44px;
 }
 
 .mv-card {
-  padding: 52px 48px;
-  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--blue);
+  border-radius: 14px;
+  padding: 34px 30px;
 }
-
-.mv-card:first-child {
-  border-right: 1px solid var(--rule);
-  background: var(--navy);
-}
-
-.mv-card:last-child {
-  background: var(--white);
-}
+.mv-card:nth-child(2) { border-top-color: var(--violet); }
 
 .mv-card-icon {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 64px;
-  font-weight: 300;
-  line-height: 1;
-  margin-bottom: 20px;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 1.6rem;
+  color: var(--blue);
+  margin-bottom: 14px;
 }
-
-.mv-card:first-child .mv-card-icon {
-  color: var(--gold);
-}
-
-.mv-card:last-child .mv-card-icon {
-  color: var(--rule);
-}
+.mv-card:nth-child(2) .mv-card-icon { color: var(--violet); }
 
 .mv-card h3 {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 24px;
+  font-family: var(--font-serif);
   font-weight: 500;
-  margin-bottom: 16px;
-  letter-spacing: 0.01em;
-}
-
-.mv-card:first-child h3 {
-  color: var(--white);
-}
-
-.mv-card:last-child h3 {
-  color: var(--navy);
+  font-size: 1.35rem;
+  color: var(--ink);
+  margin: 0 0 14px;
 }
 
 .mv-card p {
-  font-size: 14.5px;
-  line-height: 1.85;
-}
-
-.mv-card:first-child p {
-  color: rgba(255, 255, 255, 0.65);
-}
-
-.mv-card:last-child p {
-  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  line-height: 1.7;
+  color: var(--slate);
+  margin: 0;
 }
 
 .mv-quote {
-  font-family: 'Cormorant Garamond', serif;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: 17px;
-  color: var(--gold-light);
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  line-height: 1.5;
+  font-size: 0.98rem;
+  color: var(--blue);
 }
 
-@media (max-width: 900px) {
-  .mv-grid {
-    grid-template-columns: 1fr;
-  }
-  .mv-card:first-child {
-    border-right: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  }
+@media (max-width: 760px) {
+  .mv-grid { grid-template-columns: 1fr; }
 }

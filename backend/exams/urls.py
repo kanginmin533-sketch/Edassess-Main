@@ -1,3 +1,4 @@
+# 📁 backend/exams/urls.py
 from django.urls import path
 from .views import (
     ExamAttemptDetailView,
@@ -9,6 +10,7 @@ from .views import (
     InstructorExamDetailView,
     InstructorExamListCreateView,
     InstructorQuestionBulkCreateView,
+    InstructorQuestionBulkDeleteView,
     InstructorQuestionDetailView,
     InstructorQuestionListCreateView,
 )
@@ -32,4 +34,6 @@ urlpatterns = [
     path('instructor/questions/<int:pk>', InstructorQuestionDetailView.as_view(), name='instructor-question-detail'),
     path('instructor/questions/bulk', InstructorQuestionBulkCreateView.as_view(), name='instructor-questions-bulk'),
     path('instructor/questions/bulk/', InstructorQuestionBulkCreateView.as_view()),
+    path('instructor/questions/bulk-delete', InstructorQuestionBulkDeleteView.as_view(), name='instructor-questions-bulk-delete'),
+    path('instructor/questions/bulk-delete/', InstructorQuestionBulkDeleteView.as_view()),
 ]

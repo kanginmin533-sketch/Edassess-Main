@@ -1,8 +1,10 @@
-from django.db.models import Avg
+# 📁 backend/exams/views.py
+from django.db.models import Avg, Q
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from accounts.permissions import IsAdmin, IsInstructor
+from accounts.permissions import IsAdmin, IsInstructor, CanConfigureExams, CanTakeExams
+from accounts.models import User
 from .models import Exam, ExamAttempt, ExamConfig, Question
 from .serializers import (
     ExamAttemptSerializer, ExamConfigSerializer, ExamSerializer, QuestionSerializer,
@@ -10,10 +12,20 @@ from .serializers import (
 
 
 class ExamListCreateView(generics.ListCreateAPIView):
-    """Public list — mga exams na 'active' ang status, makikita ng students."""
-    queryset = Exam.objects.filter(is_active=True, status='active').order_by('-created_at')
+    """Public list — mga exams na 'active' ang status, makikita ng students.
+    GenEd/ProfEd (department=None) = shared sa lahat.
+    Major (department set) = makikita lang ng kaparehas na department ng user."""
     serializer_class = ExamSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, CanTakeExams]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Exam.objects.filter(is_active=True, status='active')
+        if user.role == User.ROLE_ADMIN:
+            return qs.order_by('-created_at')
+        return qs.filter(
+            Q(department__isnull=True) | Q(department=user.department)
+        ).order_by('-created_at')
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -34,7 +46,8 @@ class ExamAttemptListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
-        
+
+
 class ExamAttemptDetailView(generics.RetrieveAPIView):
     """Single attempt with full detail (questions/answers) — for reloading ResultsPage."""
     serializer_class = ExamAttemptSerializer
@@ -46,7 +59,14 @@ class ExamAttemptDetailView(generics.RetrieveAPIView):
 
 class ExamConfigView(generics.RetrieveUpdateAPIView):
     serializer_class = ExamConfigSerializer
-    permission_classes = [IsAdmin]
+
+    def get_permissions(self):
+        # Kahit sinong naka-login ay puwedeng basahin ang config (para malaman
+        # ng ExamPage kung on ang shuffleQuestions) — pero admin lang ang puwedeng
+        # mag-update, at kailangan pa ring naka-on ang 'configureExams' toggle.
+        if self.request.method == 'GET':
+            return [permissions.IsAuthenticated()]
+        return [IsAdmin(), CanConfigureExams()]
 
     def get_object(self):
         return ExamConfig.load()
@@ -91,45 +111,55 @@ class InstructorDashboardView(generics.GenericAPIView):
 
 class InstructorExamListCreateView(generics.ListCreateAPIView):
     serializer_class = ExamSerializer
-    permission_classes = [IsInstructor]
+    permission_classes = [IsInstructor, CanConfigureExams]
 
     def get_queryset(self):
         return Exam.objects.filter(created_by=self.request.user).order_by('-created_at')
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        category = serializer.validated_data.get('category')
+        department = self.request.user.department if category == 'Major' else None
+        serializer.save(created_by=self.request.user, department=department)
 
 
 class InstructorExamDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ExamSerializer
-    permission_classes = [IsInstructor]
+    permission_classes = [IsInstructor, CanConfigureExams]
 
     def get_queryset(self):
         return Exam.objects.filter(created_by=self.request.user)
 
 
 class InstructorQuestionListCreateView(generics.ListCreateAPIView):
-    """
-    Buong question bank. GET (list) ay bukas sa kahit sinong naka-login
-    (kailangan ito ng estudyante para makakuha ng questions sa exam) —
-    POST (create) lang ang IsInstructor-only.
-    """
-    queryset = Question.objects.all().order_by('-created_at')
+    """List — dating queryset attribute na 'all questions' ay pinalitan ng
+    get_queryset() para ma-scope by department (GenEd/ProfEd shared, Major locked)."""
     serializer_class = QuestionSerializer
 
     def get_permissions(self):
         if self.request.method == 'POST':
-            return [IsInstructor()]
+            return [IsInstructor(), CanConfigureExams()]
         return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Question.objects.all().order_by('-created_at')
+        if user.role == User.ROLE_ADMIN:
+            return qs
+        return qs.filter(Q(department__isnull=True) | Q(department=user.department))
 
     def get_serializer_context(self):
         return {'request': self.request}
+
+    def perform_create(self, serializer):
+        category = serializer.validated_data.get('category')
+        department = self.request.user.department if category == 'Major' else None
+        serializer.save(created_by=self.request.user, department=department)
 
 
 class InstructorQuestionDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Question.objects.all()
     serializer_class = QuestionSerializer
-    permission_classes = [IsInstructor]
+    permission_classes = [IsInstructor, CanConfigureExams]
 
     def get_serializer_context(self):
         return {'request': self.request}
@@ -137,7 +167,7 @@ class InstructorQuestionDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class InstructorQuestionBulkCreateView(APIView):
     """Import mula CSV/Excel/PDF — tumatanggap ng listahan ng questions."""
-    permission_classes = [IsInstructor]
+    permission_classes = [IsInstructor, CanConfigureExams]
 
     def post(self, request):
         items = request.data.get('questions', [])
@@ -145,6 +175,31 @@ class InstructorQuestionBulkCreateView(APIView):
         for item in items:
             serializer = QuestionSerializer(data=item, context={'request': request})
             serializer.is_valid(raise_exception=True)
-            question = serializer.save()
+            category = serializer.validated_data.get('category')
+            department = request.user.department if category == 'Major' else None
+            question = serializer.save(created_by=request.user, department=department)
             created.append(QuestionSerializer(question).data)
         return Response({'created': created}, status=status.HTTP_201_CREATED)
+
+
+class InstructorQuestionBulkDeleteView(APIView):
+    permission_classes = [IsInstructor, CanConfigureExams]
+
+    def delete(self, request):
+        category = request.data.get('category')
+        user = request.user
+
+        qs = Question.objects.all()
+        if user.role != User.ROLE_ADMIN:
+            qs = qs.filter(Q(department__isnull=True) | Q(department=user.department))
+
+        if category and category != 'All':
+            qs = qs.filter(category=category)
+
+        count = qs.count()
+        qs.delete()
+
+        return Response(
+            {'deleted': count, 'category': category or 'All'},
+            status=status.HTTP_200_OK,
+        )

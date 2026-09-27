@@ -1,8 +1,10 @@
+// 📁 frontend/src/pages/user/UserDashboard.jsx
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, ClipboardList, BarChart2, TrendingUp, CheckCircle, Clock, Zap, Award, AlertCircle } from 'lucide-react';
+import { BookOpen, ClipboardList, BarChart2, TrendingUp, CheckCircle, Award, Zap, AlertCircle } from 'lucide-react';
 import useAuthStore from '../../auth/useAuthStore';
 import useExamHistory from '../../hooks/useExamHistory';
+import { announcementApi } from '../../api/modulesApi';
 
 const CATEGORY_BADGE = {
   GenEd:  'u-badge u-badge-success',
@@ -52,6 +54,39 @@ export default function UserDashboard() {
   const [greeting, setGreeting] = useState('');
   const { history, loading, getSubjectSummary } = useExamHistory();
 
+  // ── Announcements (live from instructor) ──────────────────────────────
+  const [announcements, setAnnouncements] = useState([]);
+  const [annLoading, setAnnLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadAnnouncements() {
+      try {
+        const data = await announcementApi.getAnnouncements();
+        if (isMounted) setAnnouncements(data);
+      } catch (err) {
+        console.error('Failed to load announcements:', err);
+      } finally {
+        if (isMounted) setAnnLoading(false);
+      }
+    }
+
+    loadAnnouncements();
+
+    // Poll every 30s so a newly-posted announcement shows up
+    // automatically even if the student stays on this page.
+    const interval = setInterval(loadAnnouncements, 30000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const sortedAnnouncements = [...announcements]
+    .sort((a, b) => b.pinned - a.pinned || new Date(b.date) - new Date(a.date));
+
   useEffect(() => {
     const h = new Date().getHours();
     setGreeting(h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening');
@@ -71,12 +106,21 @@ export default function UserDashboard() {
   const avgScore = history.length > 0
     ? Math.round(history.reduce((sum, h) => sum + h.percentage, 0) / history.length)
     : null;
+  const bestScore = history.length > 0
+    ? Math.max(...history.map((h) => h.percentage))
+    : null;
 
+  const letStanding = getOverallLetStanding(history);
+  const categoriesCompleted = LET_CATEGORIES.filter((c) => letStanding.latestByCategory?.[c]).length;
+
+  // Removed the old "Modules" and "Study Time" cards — both were hardcoded
+  // placeholder numbers (8/24, 14h) with no backing data. These four are all
+  // computed straight from real exam attempt history.
   const STATS = [
-    { label: 'Exams Taken',       value: String(history.length),                sub: `${attemptsThisWeek} this week`, icon: ClipboardList, color: 'blue'   },
-    { label: 'Avg. Score',        value: avgScore !== null ? `${avgScore}%` : '—', sub: 'All categories',              icon: TrendingUp,    color: 'green'  },
-    { label: 'Modules Completed', value: '8',                                   sub: 'of 24 total',                   icon: CheckCircle,   color: 'purple' },
-    { label: 'Study Time',        value: '14h',                                 sub: 'Total logged',                  icon: Clock,         color: 'amber'  },
+    { label: 'Exams Taken', value: String(history.length),                    sub: `${attemptsThisWeek} this week`,       icon: ClipboardList, color: 'blue'   },
+    { label: 'Avg. Score',  value: avgScore !== null ? `${avgScore}%` : '—',  sub: 'All categories',                      icon: TrendingUp,    color: 'green'  },
+    { label: 'Best Score',  value: bestScore !== null ? `${bestScore}%` : '—', sub: 'Personal best across all attempts',  icon: Award,         color: 'purple' },
+    { label: 'LET Areas',   value: `${categoriesCompleted}/3`,                sub: 'Completed at least once',             icon: CheckCircle,   color: 'amber'  },
   ];
 
   const recentScores = history.slice(0, 5).map((h) => ({
@@ -85,8 +129,6 @@ export default function UserDashboard() {
     date: new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
     category: h.short,
   }));
-
-  const letStanding = getOverallLetStanding(history);
 
   if (loading) {
     return <div style={{ padding: 40, textAlign: 'center' }}>Loading your dashboard...</div>;
@@ -109,6 +151,34 @@ export default function UserDashboard() {
       </div>
 
       <div className="user-content">
+
+        {/* ── Announcements from instructor ── */}
+        {!annLoading && sortedAnnouncements.length > 0 && (
+          <div className="user-card" style={{ marginBottom: 24 }}>
+            <div className="user-card-header">
+              <div>
+                <h3>Announcements</h3>
+                <p>Latest updates from your instructor</p>
+              </div>
+            </div>
+            <div className="user-card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {sortedAnnouncements.slice(0, 3).map((a) => (
+                <div key={a.id} style={{
+                  padding: '12px 14px',
+                  borderRadius: 'var(--user-radius)',
+                  background: a.pinned ? 'var(--user-amber-soft)' : 'var(--user-bg)',
+                  border: `1px solid ${a.pinned ? 'rgba(217,119,6,0.25)' : 'var(--user-border)'}`,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13.5 }}>{a.title}</span>
+                    <span style={{ fontSize: 11, color: 'var(--user-text-muted)' }}>{a.date}</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12.5, color: 'var(--user-text-sub)', lineHeight: 1.5 }}>{a.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Quick Actions ── */}
         <div className="quick-actions">
@@ -251,7 +321,6 @@ export default function UserDashboard() {
             </div>
           ) : (
             <div className="user-card-body">
-              {/* Highlight callouts */}
               <div style={{ display: 'grid', gridTemplateColumns: weakest ? '1fr 1fr' : '1fr', gap: 12, marginBottom: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'var(--user-accent-soft)', borderRadius: 'var(--user-radius)', border: '1px solid rgba(22,163,74,0.15)' }}>
                   <Award size={20} style={{ color: 'var(--user-accent)', flexShrink: 0 }} />
@@ -271,7 +340,6 @@ export default function UserDashboard() {
                 )}
               </div>
 
-              {/* Per-subject breakdown */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {subjectRows.map(({ subject, correct, total, percentage, attempts }) => {
                   const level = performanceLevel(percentage);

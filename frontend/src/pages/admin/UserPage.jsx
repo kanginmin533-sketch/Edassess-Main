@@ -3,6 +3,10 @@ import { Search, UserPlus, Edit2, Trash2, X, Eye, EyeOff, RefreshCw, Loader2 } f
 import { adminApi } from "../../api/adminApi";
 
 const CREATABLE_ROLES = ['instructor', 'admin'];
+const DEPARTMENTS = [
+  { value: 'CIT', label: 'CIT', full: 'College of Information Technology' },
+  { value: 'CTE', label: 'CTE', full: 'College of Teacher Education' },
+];
 
 const ROLE_BADGE = {
   admin: 'badge badge-purple',
@@ -15,7 +19,8 @@ const STATUS_BADGE = {
   inactive: 'badge badge-warning',
 };
 
-const EMPTY_FORM = { name: '', email: '', role: 'instructor', password: '' };
+// department: '' lang kapag hindi pa napili — required kapag role === 'instructor'
+const EMPTY_FORM = { name: '', email: '', role: 'instructor', department: '', password: '' };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function generatePassword() {
@@ -48,7 +53,7 @@ export default function UserPage() {
     try {
       const data = await adminApi.getUsers();
       const list = Array.isArray(data) ? data : (data.users || data.results || []);
-      
+
       // Normalize user fields to safely display names
       const normalizedList = list.map(u => ({
         ...u,
@@ -110,7 +115,7 @@ export default function UserPage() {
       return;
     }
     setEditId(u.id);
-    setForm({ name: u.name, email: u.email, role: u.role, password: '' });
+    setForm({ name: u.name, email: u.email, role: u.role, department: u.department || '', password: '' });
     setFormError('');
     setShowPassword(false);
     setShowModal(true);
@@ -128,6 +133,7 @@ export default function UserPage() {
     if (!form.name.trim()) return setFormError('Full name is required.');
     if (!EMAIL_RE.test(form.email.trim())) return setFormError('Enter a valid email address.');
     if (!CREATABLE_ROLES.includes(form.role)) return setFormError('Role must be Instructor or Admin.');
+    if (form.role === 'instructor' && !form.department) return setFormError('Select a department (CIT or CTE) for this instructor.');
     if (!editId && form.password.trim().length < 8) return setFormError('Password must be at least 8 characters.');
 
     const emailTaken = users.some((u) => u.email.toLowerCase() === form.email.trim().toLowerCase() && u.id !== editId);
@@ -150,6 +156,7 @@ export default function UserPage() {
       email: form.email.trim(),
       username: form.email.trim(), // Django default user model often uses username
       role: form.role,
+      department: form.role === 'instructor' ? form.department : null,
       ...(form.password && { password: form.password })
     };
 
@@ -157,7 +164,7 @@ export default function UserPage() {
       if (editId) {
         const updatedUser = await adminApi.updateUser(editId, payload);
         const savedData = updatedUser.user || updatedUser;
-        
+
         const normalized = {
           ...savedData,
           name: savedData.name || savedData.full_name || form.name.trim(),
@@ -279,7 +286,12 @@ export default function UserPage() {
                         </div>
                       </div>
                     </td>
-                    <td><span className={ROLE_BADGE[u.role] || 'badge'}>{u.role}</span></td>
+                    <td>
+                      <span className={ROLE_BADGE[u.role] || 'badge'}>{u.role}</span>
+                      {u.role === 'instructor' && u.department && (
+                        <span className="badge badge-neutral" style={{ marginLeft: 6 }}>{u.department}</span>
+                      )}
+                    </td>
                     <td>
                       <button
                         onClick={() => handleToggleStatus(u)}
@@ -389,13 +401,48 @@ export default function UserPage() {
                 <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--admin-text-sub)', marginBottom: 6 }}>Role</label>
                 <select
                   value={form.role}
-                  onChange={(e) => setForm((p) => ({ ...p, role: e.target.value }))}
+                  onChange={(e) => setForm((p) => ({ ...p, role: e.target.value, department: e.target.value === 'instructor' ? p.department : '' }))}
                   style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--admin-border, #cbd5e1)', fontSize: 13.5, color: 'var(--admin-text)', background: 'var(--admin-bg-card, #fff)' }}
                 >
                   <option value="instructor">Instructor</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>
+
+              {/* Department — instructor-only. Button-style para malinaw agad ang pinili. */}
+              {form.role === 'instructor' && (
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--admin-text-sub)', marginBottom: 6 }}>
+                    Department
+                  </label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {DEPARTMENTS.map((d) => (
+                      <button
+                        key={d.value}
+                        type="button"
+                        onClick={() => setForm((p) => ({ ...p, department: d.value }))}
+                        title={d.full}
+                        style={{
+                          flex: 1,
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          border: `1px solid ${form.department === d.value ? 'var(--admin-accent, #0f172a)' : 'var(--admin-border, #cbd5e1)'}`,
+                          background: form.department === d.value ? 'var(--admin-accent-soft, #e2e8f0)' : 'var(--admin-bg-card, #fff)',
+                          color: 'var(--admin-text)',
+                          fontSize: 13,
+                          fontWeight: form.department === d.value ? 700 : 500,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--admin-text-muted)' }}>
+                    {form.department ? DEPARTMENTS.find((d) => d.value === form.department)?.full : 'Select which college this instructor belongs to.'}
+                  </p>
+                </div>
+              )}
 
               {!editId && (
                 <div>

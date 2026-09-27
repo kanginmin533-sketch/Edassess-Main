@@ -1,20 +1,21 @@
-import '../styles/CTASection.css';
+// 📁 frontend/src/components/Footer.jsx
+import '../styles/Footer.css';
 
 const links = ['About', 'Privacy', 'Contact'];
 
 export default function Footer() {
   return (
     <footer className="footer">
-      <div className="footer-brand">
-        Edu<span>Assess</span> · PRMSU IBA
-      </div>
-      <div className="footer-note">
-        © 2025 College of Teacher Education — President Ramon Magsaysay State University, Iba Main Campus
-      </div>
-      <div className="footer-links">
-        {links.map((link) => (
-          <a href="#" key={link}>{link}</a>
-        ))}
+      <div className="container footer-inner">
+        <div className="footer-brand">Edu<span>Assess</span> · PRMSU IBA</div>
+        <div className="footer-note">
+          © 2026 College of Teacher Education and College of Industrial Technology — President Ramon Magsaysay State University, Iba Main Campus
+        </div>
+        <div className="footer-links">
+          {links.map((link) => (
+            <a href="#" key={link}>{link}</a>
+          ))}
+        </div>
       </div>
     </footer>
   );

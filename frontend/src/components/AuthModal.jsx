@@ -1,6 +1,7 @@
+// 📁 frontend/src/components/AuthModal.jsx
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, KeyRound, ArrowRight, X, User } from 'lucide-react';
+import { Mail, KeyRound, ArrowRight, X, User, Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../auth/useAuthStore';
 import authApi from '../api/authApi';
@@ -12,6 +13,11 @@ const ROLE_REDIRECT = {
   instructor: '/instructor',
   user:       '/dashboard',
 };
+
+const DEPARTMENTS = [
+  { value: 'CIT', label: 'CIT', full: 'College of Information Technology' },
+  { value: 'CTE', label: 'CTE', full: 'College of Teacher Education' },
+];
 
 // Pulls a readable message out of a DRF error response, which can show up
 // in a few different shapes depending on which view raised it:
@@ -45,6 +51,69 @@ const InputField = ({ icon: Icon, type, placeholder, value, onChange }) => (
   </div>
 );
 
+// Password field with a show/hide toggle. Same visual shell as InputField,
+// but swaps the input type and renders an eye icon button on the right.
+const PasswordField = ({ placeholder, value, onChange, show, onToggle }) => (
+  <div className="enhanced-input-group">
+    <KeyRound className="enhanced-field-icon" size={18} />
+    <input
+      type={show ? 'text' : 'password'}
+      placeholder={placeholder}
+      className="sans-input"
+      value={value}
+      onChange={onChange}
+      required
+    />
+    <button
+      type="button"
+      className="password-toggle-btn"
+      onClick={onToggle}
+      tabIndex={-1}
+      aria-label={show ? 'Hide password' : 'Show password'}
+    >
+      {show ? <EyeOff size={16} /> : <Eye size={16} />}
+    </button>
+  </div>
+);
+
+// Department selector for registration — CIT vs CTE. Button-style, same
+// pattern as the admin UserPage instructor department picker.
+const DepartmentField = ({ value, onChange }) => (
+  <div style={{ marginBottom: 14, width: '100%' }}>
+    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-light)' }}>
+      Which college are you under?
+    </label>
+    <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+      {DEPARTMENTS.map((d) => (
+        <button
+          key={d.value}
+          type="button"
+          onClick={() => onChange(d.value)}
+          title={d.full}
+          style={{
+            flex: '1 1 0',
+            minWidth: 0,
+            boxSizing: 'border-box',
+            padding: '10px 12px',
+            borderRadius: 8,
+            border: `1px solid ${value === d.value ? 'var(--prmsu-gold)' : 'var(--border-subtle)'}`,
+            background: value === d.value ? 'var(--prmsu-gold-pale)' : '#ffffff',
+            color: 'var(--text-dark)',
+            fontSize: 13.5,
+            fontWeight: value === d.value ? 700 : 500,
+            cursor: 'pointer',
+          }}
+        >
+          {d.label}
+        </button>
+      ))}
+    </div>
+    <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--text-light)' }}>
+      {value ? DEPARTMENTS.find((d) => d.value === value)?.full : 'Select your college.'}
+    </p>
+  </div>
+);
+
 const SubmitButton = ({ text, disabled }) => (
   <button
     className="enhanced-submit-btn"
@@ -65,16 +134,23 @@ const AuthModal = () => {
     email:           '',
     password:        '',
     confirmPassword: '',
+    department:      '', // 'CIT' | 'CTE' — register only
   });
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError]         = useState('');
   const [notice, setNotice]       = useState('');
 
+  // ── Show/hide password state (register form only) ──────────────────────
+  const [showPw, setShowPw]               = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+
   // ── Helpers ──────────────────────────────────────────────────────────────
   const resetForm = () => {
-    setFormData({ fullName: '', email: '', password: '', confirmPassword: '' });
+    setFormData({ fullName: '', email: '', password: '', confirmPassword: '', department: '' });
     setError('');
+    setShowPw(false);
+    setShowConfirmPw(false);
   };
 
   const closeModal = () => {
@@ -122,10 +198,10 @@ const AuthModal = () => {
   // ── Register ──────────────────────────────────────────────────────────────
   const handleRegister = async (e) => {
     e.preventDefault();
-    const { fullName, email, password, confirmPassword } = formData;
+    const { fullName, email, password, confirmPassword, department } = formData;
 
-    if (!fullName || !email || !password || !confirmPassword) {
-      setError('Please complete all fields.');
+    if (!fullName || !email || !password || !confirmPassword || !department) {
+      setError('Please complete all fields, including your college.');
       return;
     }
 
@@ -143,7 +219,7 @@ const AuthModal = () => {
       setIsLoading(true);
       setError('');
 
-      await authApi.register({ fullName, email, password, confirmPassword });
+      await authApi.register({ fullName, email, password, confirmPassword, department });
 
       resetForm();
       setNotice('Account created! You can now log in.');
@@ -247,19 +323,23 @@ const AuthModal = () => {
                     value={formData.email}
                     onChange={(e) => handleInputChange(e, 'email')}
                   />
-                  <InputField
-                    icon={KeyRound}
-                    type="password"
+                  <DepartmentField
+                    value={formData.department}
+                    onChange={(val) => setFormData((p) => ({ ...p, department: val }))}
+                  />
+                  <PasswordField
                     placeholder="Password"
                     value={formData.password}
                     onChange={(e) => handleInputChange(e, 'password')}
+                    show={showPw}
+                    onToggle={() => setShowPw((v) => !v)}
                   />
-                  <InputField
-                    icon={KeyRound}
-                    type="password"
+                  <PasswordField
                     placeholder="Confirm Password"
                     value={formData.confirmPassword}
                     onChange={(e) => handleInputChange(e, 'confirmPassword')}
+                    show={showConfirmPw}
+                    onToggle={() => setShowConfirmPw((v) => !v)}
                   />
                   <SubmitButton
                     text={isLoading ? 'Processing...' : 'Create Account'}

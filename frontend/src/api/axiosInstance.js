@@ -1,9 +1,18 @@
-// 📁 axiosInstance.js
+// frontend/src/api/axiosInstance.js
 import axios from 'axios';
 import useAuthStore from '../auth/useAuthStore';
 
+const TOKEN_KEY = 'edassess_token';
+
+// Endpoints that must NEVER carry an Authorization header and whose 401
+// means "wrong credentials", not "session expired".
+const PUBLIC_ENDPOINTS = ['/auth/login', '/auth/register'];
+
+const isPublicEndpoint = (url = '') =>
+  PUBLIC_ENDPOINTS.some((path) => url.includes(path));
+
 const axiosInstance = axios.create({
-  baseURL: 'http://127.0.0.1:8000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -11,14 +20,17 @@ const axiosInstance = axios.create({
 
 axiosInstance.interceptors.request.use(
   (config) => {
-    const token =
-      localStorage.getItem('edassess_token') ||
-      localStorage.getItem('access_token') ||
-      localStorage.getItem('access') ||
-      localStorage.getItem('token');
+    // Don't attach a (possibly stale) token to login/register.
+    // DRF validates the header BEFORE the view runs, so a bad token
+    // causes "Given token not valid for any token type" even on AllowAny views.
+    if (isPublicEndpoint(config.url)) {
+      delete config.headers.Authorization;
+      return config;
+    }
 
-    if (token) {
-      const cleanToken = token.replace(/^"(.*)"$/, '$1');
+    const raw = localStorage.getItem(TOKEN_KEY);
+    if (raw) {
+      const cleanToken = raw.replace(/^"(.*)"$/, '$1');
       config.headers.Authorization = `Bearer ${cleanToken}`;
     }
     return config;
@@ -28,18 +40,15 @@ axiosInstance.interceptors.request.use(
 
 axiosInstance.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    if (error.response?.status === 401) {
-      // Log first so it's visible even without "Preserve log" toggled on
-      console.error(
-        '[axiosInstance] 401 received for',
-        error.config?.url,
-        '— response:',
-        error.response?.data
-      );
+  (error) => {
+    const status = error.response?.status;
+    const url = error.config?.url;
 
-      // Sync the actual auth store instead of just wiping localStorage directly.
-      // Zustand stores can be read/mutated outside React components via getState().
+    // A 401 from login/register just means bad credentials.
+    // Let the modal show the error; don't wipe state or redirect.
+    if (status === 401 && !isPublicEndpoint(url)) {
+      console.error('[axiosInstance] 401 received for', url, '— response:', error.response?.data);
+
       useAuthStore.getState().logout();
 
       // Avoid redirect loop if we're already on the landing page

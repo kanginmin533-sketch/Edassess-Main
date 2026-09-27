@@ -1,3 +1,4 @@
+/* 📁 frontend/src/index.css */
 :root {
   --text: #6b6375;
   --text-h: #08060d;
@@ -54,12 +55,12 @@ body {
   margin: 0;
 }
 
+/* Vite starter template originally capped this at 1126px with a centered,
+   bordered box and text-align:center — that broke the landing page layout
+   (forced every left-aligned section to center, and boxed the full-bleed
+   dark sections). Now just a plain full-width, full-height shell. */
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
+  width: 100%;
   min-height: 100svh;
   display: flex;
   flex-direction: column;

@@ -16,12 +16,9 @@ const authApi = {
    * @param {{ fullName: string, email: string, password: string, confirmPassword: string }} data
    * @returns {{ message: string }}
    */
-  register: async ({ fullName, email, password, confirmPassword }) => {
+  register: async ({ fullName, email, password, confirmPassword, department }) => {
     const response = await axiosInstance.post('/auth/register', {
-      name: fullName,
-      email,
-      password,
-      password_confirmation: confirmPassword,
+      name: fullName, email, password, confirmPassword, department,
     });
     return response.data;
   },
@@ -40,6 +37,16 @@ const authApi = {
    */
   me: async () => {
     const response = await axiosInstance.get('/auth/me');
+    return response.data;
+  },
+
+  /**
+   * Get the current user's own permission set (role-based), used by
+   * AdminLayout/InstructorLayout to show/hide nav items.
+   * @returns {{ [permKey]: boolean }}
+   */
+  getMyPermissions: async () => {
+    const response = await axiosInstance.get('/auth/my-permissions');
     return response.data;
   },
 };

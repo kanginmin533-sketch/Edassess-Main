@@ -1,3 +1,4 @@
+// 📁 frontend/src/components/ProductPreview.jsx
 import '../styles/ProductPreview.css';
 
 export default function ProductPreview() {
@@ -5,8 +6,8 @@ export default function ProductPreview() {
     <section className="preview-section" id="preview">
       <div className="container">
         <div className="preview-header">
-          <div className="section-label">The Reviewer, Live</div>
-          <h2 className="section-title">See EduAssess in Action</h2>
+          <div className="section-label">The reviewer, live</div>
+          <h2 className="section-title">See EduAssess in action</h2>
           <div className="section-rule" />
           <p className="body-text">
             A full LET simulation — countdown timer, question navigator, and instant
@@ -16,9 +17,6 @@ export default function ProductPreview() {
 
         <div className="preview-frame">
           <div className="preview-chrome">
-            <div className="preview-dots">
-              <span /><span /><span />
-            </div>
             <div className="preview-chrome-title">EduAssess — Professional Education</div>
             <div className="preview-timer">01:58:32</div>
           </div>
@@ -28,12 +26,7 @@ export default function ProductPreview() {
               <div className="preview-nav-label">Questions</div>
               <div className="preview-nav-grid">
                 {Array.from({ length: 24 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={
-                      i === 6 ? 'nav-dot current' : i < 6 ? 'nav-dot answered' : 'nav-dot'
-                    }
-                  />
+                  <span key={i} className={i === 6 ? 'nav-dot current' : i < 6 ? 'nav-dot answered' : 'nav-dot'} />
                 ))}
               </div>
               <div className="preview-nav-legend">

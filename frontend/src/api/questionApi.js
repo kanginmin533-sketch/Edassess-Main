@@ -1,3 +1,4 @@
+// 📁 frontend/src/api/questionApi.js
 import axiosInstance from './axiosInstance';
 
 export const questionApi = {
@@ -20,6 +21,15 @@ export const questionApi = {
   bulkCreateQuestions: async (questions) => {
     const response = await axiosInstance.post('/instructor/questions/bulk', { questions });
     return response.data.created;
+  },
+  // category: 'All' | 'GenEd' | 'ProfEd' | 'Major'. axiosInstance.delete needs
+  // the body wrapped in a `data` key — DELETE requests don't take a body as
+  // the second positional argument the way POST/PUT do.
+  bulkDeleteQuestions: async (category) => {
+    const response = await axiosInstance.delete('/instructor/questions/bulk-delete', {
+      data: { category },
+    });
+    return response.data;
   },
 };
 

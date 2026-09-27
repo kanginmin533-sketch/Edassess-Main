@@ -1,7 +1,8 @@
 //src/pages/instructor/ExamBuilderPage.jsx
 import { useState, useEffect } from 'react';
-import { ClipboardList, Plus, Trash2, X, Clock, BookOpen } from 'lucide-react';
+import { ClipboardList, Plus, Trash2, X, Clock, BookOpen, CheckSquare, Square } from 'lucide-react';
 import { examApi } from '../../api/examApi';
+import useAuthStore from '../../auth/useAuthStore';
 
 // LET-based default durations
 const CATEGORY_DEFAULTS = {
@@ -22,6 +23,8 @@ const CATEGORY_BADGE = {
   Major:  'inst-badge inst-badge-amber',
 };
 
+const MAX_QUESTIONS_PER_EXAM = 180;
+
 const DIFFICULTY_BADGE = {
   Easy:   'inst-badge inst-badge-success',
   Medium: 'inst-badge inst-badge-amber',
@@ -31,6 +34,7 @@ const DIFFICULTY_BADGE = {
 const EMPTY_FORM = { name: '', category: 'GenEd', duration: 120, selectedQuestions: [], status: 'draft' };
 
 export default function ExamBuilderPage() {
+  const { user } = useAuthStore(); // ← bago, para malaman ang sariling department
   const [exams, setExams]         = useState([]);
   const [questionPool, setQuestionPool] = useState([]);
   const [fetching, setFetching]   = useState(true);
@@ -69,14 +73,15 @@ export default function ExamBuilderPage() {
       created: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
     };
   }
-function mapQuestionFromApi(q) {
-  return {
-    id: q.id,
-    question: q.question,   
-    category: q.category,
-    difficulty: q.difficulty,
-  };
-}
+  function mapQuestionFromApi(q) {
+    return {
+      id: q.id,
+      question: q.question,
+      category: q.category,
+      difficulty: q.difficulty,
+      department: q.department, // ← bago — null/'CIT'/'CTE', aplikable lang sa Major
+    };
+  }
 
   const openAdd = () => {
     setEditItem(null);
@@ -97,17 +102,68 @@ function mapQuestionFromApi(q) {
   };
 
   const toggleQuestion = (id) => {
-    setForm((p) => ({
-      ...p,
-      selectedQuestions: p.selectedQuestions.includes(id)
-        ? p.selectedQuestions.filter((q) => q !== id)
-        : [...p.selectedQuestions, id],
-    }));
+    setForm((p) => {
+      const isSelected = p.selectedQuestions.includes(id);
+      if (!isSelected && p.selectedQuestions.length >= MAX_QUESTIONS_PER_EXAM) {
+        alert(`You can only select up to ${MAX_QUESTIONS_PER_EXAM} questions per exam.`);
+        return p; // walang binago — huwag idagdag
+      }
+      return {
+        ...p,
+        selectedQuestions: isSelected
+          ? p.selectedQuestions.filter((q) => q !== id)
+          : [...p.selectedQuestions, id],
+      };
+    });
+  };
+
+  // GenEd/ProfEd — shared, makikita ng lahat ng instructor. Major — naka-scope
+  // lang sa sariling department ng instructor (CIT instructor makakakita lang
+  // ng Major questions na ginawa ng ibang CIT instructor, hindi CTE, at vice versa).
+  const filteredPool = questionPool.filter((q) => {
+    if (qFilter !== 'All' && q.category !== qFilter) return false;
+    if (q.category === 'Major') return q.department === user?.department;
+    return true;
+  });
+
+  // Select All is scoped to whatever's currently visible under qFilter — picking
+  // "Major" then Select All only grabs the Major questions shown, not the whole pool.
+  const allFilteredSelected = filteredPool.length > 0
+    && filteredPool.every((q) => form.selectedQuestions.includes(q.id));
+
+  const handleToggleSelectAll = () => {
+    setForm((p) => {
+      if (allFilteredSelected) {
+        // Deselect: remove only the currently-filtered ids, keep selections
+        // made under other filters untouched.
+        const filteredIds = new Set(filteredPool.map((q) => q.id));
+        return { ...p, selectedQuestions: p.selectedQuestions.filter((id) => !filteredIds.has(id)) };
+      }
+
+      const alreadySelected = new Set(p.selectedQuestions);
+      const toAdd = filteredPool.filter((q) => !alreadySelected.has(q.id)).map((q) => q.id);
+      const combined = [...p.selectedQuestions, ...toAdd];
+
+      if (combined.length > MAX_QUESTIONS_PER_EXAM) {
+        const room = MAX_QUESTIONS_PER_EXAM - p.selectedQuestions.length;
+        alert(
+          room > 0
+            ? `Only ${room} more question(s) can be added — the maximum is ${MAX_QUESTIONS_PER_EXAM}. Selected the first ${room} from this list.`
+            : `You've already reached the maximum of ${MAX_QUESTIONS_PER_EXAM} questions.`
+        );
+        return { ...p, selectedQuestions: [...p.selectedQuestions, ...toAdd.slice(0, Math.max(room, 0))] };
+      }
+
+      return { ...p, selectedQuestions: combined };
+    });
   };
 
   const handleSave = async () => {
     if (!form.name.trim()) return alert('Exam name is required.');
     if (form.selectedQuestions.length === 0) return alert('Select at least one question.');
+    if (form.selectedQuestions.length > MAX_QUESTIONS_PER_EXAM) {
+      return alert(`This exam has ${form.selectedQuestions.length} questions — the maximum is ${MAX_QUESTIONS_PER_EXAM}.`);
+    }
 
     setSaving(true);
     try {
@@ -143,10 +199,6 @@ function mapQuestionFromApi(q) {
       alert(err.response?.data?.detail || err.message || 'Failed to delete exam.');
     }
   };
-
-  const filteredPool = qFilter === 'All'
-    ? questionPool
-    : questionPool.filter((q) => q.category === qFilter);
 
   if (fetching) {
     return <div style={{ padding: 40, textAlign: 'center' }}>Loading exam builder...</div>;
@@ -264,6 +316,11 @@ function mapQuestionFromApi(q) {
                     <option value="ProfEd">ProfEd</option>
                     <option value="Major">Major</option>
                   </select>
+                  {form.category === 'Major' && (
+                    <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--inst-text-muted)' }}>
+                      Scoped to your department: <strong>{user?.department || '—'}</strong>
+                    </p>
+                  )}
                 </div>
 
                 <div className="inst-form-group">
@@ -298,13 +355,27 @@ function mapQuestionFromApi(q) {
 
               {/* Question Picker */}
               <div className="inst-form-group" style={{ marginBottom: 0 }}>
-                <label className="inst-form-label">
-                  Select Questions
-                  <span className="inst-form-label-sub">· {form.selectedQuestions.length} selected</span>
-                </label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                  <label className="inst-form-label" style={{ marginBottom: 0 }}>
+                    Select Questions
+                    <span className="inst-form-label-sub">
+                      · {form.selectedQuestions.length} / {MAX_QUESTIONS_PER_EXAM} selected
+                    </span>
+                  </label>
+
+                  <button
+                    type="button"
+                    className="inst-btn inst-btn-sm inst-btn-secondary"
+                    onClick={handleToggleSelectAll}
+                    disabled={filteredPool.length === 0}
+                  >
+                    {allFilteredSelected ? <Square size={13} /> : <CheckSquare size={13} />}
+                    {allFilteredSelected ? `Deselect ${qFilter}` : `Select All ${qFilter} (${filteredPool.length})`}
+                  </button>
+                </div>
 
                 {/* Filter */}
-                <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 6, margin: '12px 0' }}>
                   {['All', 'GenEd', 'ProfEd', 'Major'].map((f) => (
                     <button
                       key={f}
@@ -320,27 +391,40 @@ function mapQuestionFromApi(q) {
                 <div style={{ border: '1px solid var(--inst-border)', borderRadius: 'var(--inst-radius)', overflow: 'hidden' }}>
                   {filteredPool.length === 0 ? (
                     <div style={{ padding: 20, textAlign: 'center', fontSize: 13, color: 'var(--inst-text-sub)' }}>
-                      No questions available. Add some in the Question Bank first.
+                      {qFilter === 'Major'
+                        ? `No Major questions for your department (${user?.department || '—'}) yet. Add some in the Question Bank first.`
+                        : 'No questions available. Add some in the Question Bank first.'}
                     </div>
                   ) : (
                     filteredPool.map((q) => {
                       const isSelected = form.selectedQuestions.includes(q.id);
+                      const limitReached = !isSelected && form.selectedQuestions.length >= MAX_QUESTIONS_PER_EXAM;
                       return (
                         <div
                           key={q.id}
-                          onClick={() => toggleQuestion(q.id)}
+                          onClick={() => !limitReached && toggleQuestion(q.id)}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 12,
-                            padding: '11px 14px', cursor: 'pointer',
+                            padding: '11px 14px',
+                            cursor: limitReached ? 'not-allowed' : 'pointer',
                             borderBottom: '1px solid var(--inst-border)',
                             background: isSelected ? 'var(--inst-accent-soft)' : 'transparent',
-                            transition: 'background 0.15s',
+                            opacity: limitReached ? 0.45 : 1,
+                            transition: 'background 0.15s, opacity 0.15s',
                           }}
                         >
-                          <input type="checkbox" checked={isSelected} onChange={() => toggleQuestion(q.id)} style={{ flexShrink: 0, accentColor: 'var(--inst-accent)' }} />
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={limitReached}
+                            onChange={() => toggleQuestion(q.id)}
+                            style={{ flexShrink: 0, accentColor: 'var(--inst-accent)' }}
+                          />
                           <span style={{ flex: 1, fontSize: 13, color: 'var(--inst-text)' }}>{q.question}</span>
                           <span className={DIFFICULTY_BADGE[q.difficulty]}>{q.difficulty}</span>
-                          <span className={CATEGORY_BADGE[q.category]}>{q.category}</span>
+                          <span className={CATEGORY_BADGE[q.category]}>
+                            {q.category === 'Major' && q.department ? `Major (${q.department})` : q.category}
+                          </span>
                         </div>
                       );
                     })

@@ -4,15 +4,13 @@ from django.db import models
 
 
 class UserManager(BaseUserManager):
-    """Custom manager since we use email instead of username to log in."""
-
-    def create_user(self, email, name, password=None, role='user'):
+    def create_user(self, email, name, password=None, role='user', department=None):
         if not email:
             raise ValueError('Users must have an email address.')
         if not name:
             raise ValueError('Users must have a name.')
 
-        user = self.model(email=self.normalize_email(email), name=name, role=role)
+        user = self.model(email=self.normalize_email(email), name=name, role=role, department=department)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -36,9 +34,20 @@ class User(AbstractBaseUser, PermissionsMixin):
         (ROLE_STUDENT, 'Student'),
     )
 
+    DEPT_CIT = 'CIT'
+    DEPT_CTE = 'CTE'
+    DEPARTMENT_CHOICES = (
+        (DEPT_CIT, 'College of Information Technology'),
+        (DEPT_CTE, 'College of Teacher Education'),
+    )
+
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=255)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_STUDENT)
+
+    # Aplikable lang kapag role == instructor. Ginagamit para i-tag kung saang
+    # college nakalagay ang instructor — nagde-drive ito ng CIT vs CTE UI/routing.
+    department = models.CharField(max_length=10, choices=DEPARTMENT_CHOICES, blank=True, null=True)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)

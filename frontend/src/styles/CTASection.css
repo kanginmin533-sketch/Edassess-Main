@@ -1,153 +1,38 @@
+/* 📁 frontend/src/styles/CTASection.css */
+
 .cta-section {
-  background: linear-gradient(135deg, var(--navy-deep) 0%, var(--navy) 100%);
-  padding: 112px 0;
-  text-align: center;
+  padding: 100px 0;
+  background: linear-gradient(135deg, var(--navy) 0%, var(--blue) 100%);
   position: relative;
-  overflow: hidden;
 }
 
-.cta-section::before {
-  content: 'EDUASSESS';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 180px;
-  font-weight: 300;
-  color: rgba(255, 255, 255, 0.025);
-  white-space: nowrap;
-  letter-spacing: 0.1em;
-  pointer-events: none;
-}
+.cta-inner { max-width: 560px; }
 
-.cta-inner {
-  position: relative;
-  z-index: 1;
-}
-
-.cta-inner .section-label {
-  justify-content: center;
-  color: var(--gold);
-}
-
-.cta-inner .section-label::before {
-  background: rgba(200, 155, 60, 0.6);
-}
+.cta-section .section-label { color: var(--amber); }
+.cta-section .section-label::before { background: var(--amber); }
 
 .cta-title {
-  font-family: 'Cormorant Garamond', serif;
-  font-weight: 300;
-  font-size: clamp(32px, 4vw, 52px);
-  color: var(--white);
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: clamp(2rem, 3.6vw, 2.9rem);
   line-height: 1.15;
-  margin-bottom: 20px;
+  color: #fff;
+  margin: 0 0 20px;
 }
 
 .cta-sub {
-  font-size: 15px;
-  color: rgba(255, 255, 255, 0.5);
-  line-height: 1.75;
-  max-width: 480px;
-  margin: 0 auto 48px;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.7;
+  color: rgba(255,255,255,0.75);
+  margin: 0 0 36px;
+  max-width: 50ch;
 }
 
-.cta-buttons {
-  display: flex;
-  gap: 16px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
+.cta-buttons { display: flex; gap: 16px; flex-wrap: wrap; }
 
-.cta-btn-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--gold);
-  color: var(--navy-deep);
-  padding: 15px 36px;
-  border-radius: 4px;
-  text-decoration: none;
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  transition: background 0.2s, transform 0.18s;
-}
-
-.cta-btn-primary:hover {
-  background: var(--gold-light);
-  transform: translateY(-2px);
-}
-
-.cta-btn-ghost {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1.5px solid rgba(255, 255, 255, 0.25);
-  color: rgba(255, 255, 255, 0.75);
-  padding: 14px 36px;
-  border-radius: 4px;
-  text-decoration: none;
-  font-size: 14px;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  transition: border-color 0.2s, color 0.2s;
-}
-
-.cta-btn-ghost:hover {
-  border-color: var(--white);
-  color: var(--white);
-}
-
-/* FOOTER */
-.footer {
-  background: var(--navy-deep);
-  padding: 40px 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.footer-brand {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 16px;
-  color: var(--white);
-  font-weight: 400;
-}
-
-.footer-brand span {
-  color: var(--gold);
-}
-
-.footer-note {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.3);
-  letter-spacing: 0.03em;
-}
-
-.footer-links {
-  display: flex;
-  gap: 24px;
-}
-
-.footer-links a {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.35);
-  text-decoration: none;
-  letter-spacing: 0.04em;
-  transition: color 0.2s;
-}
-
-.footer-links a:hover {
-  color: var(--gold);
-}
-
-@media (max-width: 900px) {
-  .footer {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 32px 24px;
-  }
-}
+.cta-section .btn-primary { background: var(--amber); color: var(--ink); box-shadow: 0 10px 24px -8px rgba(255, 167, 38, 0.6); }
+.cta-section .btn-primary:hover { background: #FFB84D; }
+.cta-section .btn-ghost { color: #fff; border-color: rgba(255,255,255,0.3); }
+.cta-section .btn-ghost:hover { border-color: #fff; color: #fff; }
+.cta-section .icon-3d-amber .icon-3d-glow { background: rgba(255,255,255,0.15); }

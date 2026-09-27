@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from accounts.models import User 
 
 
 class Question(models.Model):
@@ -25,6 +26,9 @@ class Question(models.Model):
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='Medium')
     explanation = models.TextField(blank=True)
     points = models.IntegerField(default=1)
+    department = models.CharField(
+        max_length=10, choices=User.DEPARTMENT_CHOICES, blank=True, null=True
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -39,12 +43,12 @@ class Question(models.Model):
 
 class Choice(models.Model):
     question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name='choices')
-    text = models.CharField(max_length=255)
+    text = models.TextField()  # ← CharField(max_length=255) papunta rito
     is_correct = models.BooleanField(default=False)
+    explanation = models.TextField(blank=True)
 
     def __str__(self):
-        return self.text
-
+        return self.text[:50]  
 
 class Exam(models.Model):
     CATEGORY_CHOICES = (
@@ -66,6 +70,9 @@ class Exam(models.Model):
     passing_score = models.IntegerField(default=75)
     is_active = models.BooleanField(default=True)
     questions = models.ManyToManyField(Question, related_name='exams', blank=True)
+    department = models.CharField(
+        max_length=10, choices=User.DEPARTMENT_CHOICES, blank=True, null=True
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

@@ -59,6 +59,11 @@ export const examApi = {
     const response = await axiosInstance.get(`/exams/history/${attemptId}`);
     return response.data;
   },
+
+  getExamConfig: async () => {
+    const response = await axiosInstance.get('/exam-config');
+    return response.data;
+  },
 };
 
 export default examApi;

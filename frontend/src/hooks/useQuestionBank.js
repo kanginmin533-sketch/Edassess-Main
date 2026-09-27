@@ -1,3 +1,4 @@
+// 📁 frontend/src/hooks/useQuestionBank.js
 import { useState, useEffect, useCallback } from 'react';
 import { questionApi } from '../api/questionApi';
 
@@ -49,5 +50,17 @@ export default function useQuestionBank() {
     setQuestions((prev) => prev.filter((q) => q.id !== id));
   }, []);
 
-  return { questions, loading, addQuestion, addQuestions, updateQuestion, removeQuestion };
+  // category: 'All' | 'GenEd' | 'ProfEd' | 'Major' — tinatanggal lokal na rin
+  // ang mga tugma sa state kapag successful, para hindi na kailangang mag-refetch.
+  const bulkRemoveQuestions = useCallback(async (category) => {
+    const result = await questionApi.bulkDeleteQuestions(category);
+    setQuestions((prev) =>
+      !category || category === 'All'
+        ? []
+        : prev.filter((q) => q.category !== category)
+    );
+    return result;
+  }, []);
+
+  return { questions, loading, addQuestion, addQuestions, updateQuestion, removeQuestion, bulkRemoveQuestions };
 }

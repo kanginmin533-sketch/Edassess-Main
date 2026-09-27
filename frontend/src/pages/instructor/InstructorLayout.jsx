@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, BookOpen, ClipboardList,
@@ -7,18 +8,34 @@ import useAuthStore from '../../auth/useAuthStore';
 import authApi from '../../api/authApi';
 import './instructor.css';
 
+// Announcements: walang hiwalay na permission key sa matrix (PERMISSION_LABELS),
+// kaya permKey: null dito — laging bisible, hanggang wala pang idinagdag na toggle.
 const NAV_ITEMS = [
-  { to: '/instructor',              label: 'Dashboard',        icon: LayoutDashboard, end: true },
-  { to: '/instructor/questions',    label: 'Question Bank',    icon: BookOpen },
-  { to: '/instructor/exams',        label: 'Exam Builder',     icon: ClipboardList },
-  { to: '/instructor/modules',      label: 'Review Modules',   icon: FolderOpen },
-  { to: '/instructor/monitor',      label: 'Student Monitor',  icon: Users },
-  { to: '/instructor/announcements',label: 'Announcements',    icon: Megaphone },
+  { to: '/instructor',              label: 'Dashboard',        icon: LayoutDashboard, end: true, permKey: 'viewDashboard' },
+  { to: '/instructor/questions',    label: 'Question Bank',    icon: BookOpen,        permKey: 'configureExams' },
+  { to: '/instructor/exams',        label: 'Exam Builder',     icon: ClipboardList,   permKey: 'configureExams' },
+  { to: '/instructor/modules',      label: 'Review Modules',   icon: FolderOpen,      permKey: 'viewReviewModules' },
+  { to: '/instructor/monitor',      label: 'Student Monitor',  icon: Users,           permKey: 'viewReports' },
+  { to: '/instructor/announcements',label: 'Announcements',    icon: Megaphone,       permKey: null },
 ];
 
 export default function InstructorLayout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const [perms, setPerms] = useState(null);
+
+  useEffect(() => {
+    async function loadPerms() {
+      try {
+        const data = await authApi.getMyPermissions();
+        setPerms(data || {});
+      } catch (err) {
+        console.error('Failed to load permissions:', err);
+        setPerms({});
+      }
+    }
+    loadPerms();
+  }, []);
 
   const handleLogout = async () => {
     try { await authApi.logout(); } catch { /* still logout client-side */ }
@@ -28,6 +45,12 @@ export default function InstructorLayout() {
   const initials = user?.name
     ? user.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
     : 'IN';
+
+  const visibleNavItems = NAV_ITEMS.filter(({ permKey }) => {
+    if (!permKey) return true;
+    if (perms === null) return true;
+    return perms[permKey] !== false;
+  });
 
   return (
     <div className="inst-shell">
@@ -46,7 +69,7 @@ export default function InstructorLayout() {
         <div className="inst-sidebar-section">
           <div className="inst-sidebar-label">Main Menu</div>
           <ul className="inst-nav">
-            {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+            {visibleNavItems.map(({ to, label, icon: Icon, end }) => (
               <li key={to}>
                 <NavLink
                   to={to}

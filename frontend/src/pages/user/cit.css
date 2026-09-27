@@ -1,0 +1,62 @@
+/* ── CIT Student Panel — Tech-inspired override ──────────────────────────────
+   Ina-override lang ang design tokens na dating naka-define sa user.css,
+   naka-scope sa .cit-user-shell — kaya lahat ng existing components (cards,
+   badges, buttons) na gumagamit ng var(--user-*) ay awtomatikong nagbabago
+   ng itsura nang walang kailangang galawin doon. Nananatiling light ang
+   main content area; ang sidebar lang ang dark, para hindi ito masalungat
+   sa hiwalay na "dark mode" item sa listahan. */
+
+.cit-user-shell {
+  --user-accent:      #0891b2;
+  --user-accent-soft: rgba(8, 145, 178, 0.08);
+  --user-accent-mid:  rgba(8, 145, 178, 0.2);
+
+  --cit-sidebar-bg:     #0b1420;
+  --cit-sidebar-border: #16233a;
+  --cit-sidebar-text:   #93a4c3;
+  --cit-sidebar-text-dim: #4d5d7a;
+}
+
+/* ── Sidebar — dark navy, cyan accents ── */
+.cit-user-shell .user-sidebar {
+  background: var(--cit-sidebar-bg);
+  border-right: 1px solid var(--cit-sidebar-border);
+}
+
+.cit-user-shell .user-brand {
+  border-bottom: 1px solid var(--cit-sidebar-border);
+}
+.cit-user-shell .user-brand-icon {
+  background: var(--user-accent);
+}
+.cit-user-shell .user-brand-text span:first-child { color: #e5eaf3; }
+.cit-user-shell .user-brand-text span:last-child   { color: var(--cit-sidebar-text-dim); }
+
+.cit-user-shell .user-sidebar-label { color: var(--cit-sidebar-text-dim); }
+
+.cit-user-shell .user-nav-item {
+  color: var(--cit-sidebar-text);
+}
+.cit-user-shell .user-nav-item:hover,
+.cit-user-shell .user-nav-item.active {
+  background: rgba(8, 145, 178, 0.15);
+  color: #22d3ee;
+}
+
+.cit-user-shell .user-sidebar-footer {
+  border-top: 1px solid var(--cit-sidebar-border);
+}
+.cit-user-shell .user-avatar {
+  background: var(--user-accent);
+}
+.cit-user-shell .user-name       { color: #e5eaf3; }
+.cit-user-shell .user-role-label { color: var(--cit-sidebar-text-dim); }
+.cit-user-shell .user-logout-btn { color: var(--cit-sidebar-text-dim); }
+.cit-user-shell .user-logout-btn:hover { color: #f87171; }
+
+/* ── Topbar badge — cyan instead of green ── */
+.cit-user-shell .user-topbar-badge {
+  background: var(--user-accent-soft);
+  border-color: var(--user-accent-mid);
+  color: var(--user-accent);
+}

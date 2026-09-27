@@ -1,6 +1,7 @@
-# 📁 backend/modules/models.py
+# backend/modules/models.py
 from django.conf import settings
 from django.db import models
+from accounts.models import User
 
 
 class Module(models.Model):
@@ -13,6 +14,9 @@ class Module(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
+    department = models.CharField(
+        max_length=10, choices=User.DEPARTMENT_CHOICES, blank=True, null=True
+    )
     file = models.FileField(upload_to='review_modules/')
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -38,7 +42,8 @@ class Module(models.Model):
             return self.file.size
         except (ValueError, OSError):
             return 0
-        
+
+
 class Announcement(models.Model):
     AUDIENCE_CHOICES = (
         ('All Students', 'All Students'),

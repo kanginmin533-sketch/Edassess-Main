@@ -3,11 +3,6 @@ from .models import Choice, Exam, ExamAttempt, ExamConfig, Question
 
 
 class QuestionSerializer(serializers.Serializer):
-    """
-    Custom serializer — hindi ModelSerializer dahil ang shape na ginagamit
-    ng frontend (choices[] + answer index) ay hindi direktang tumutugma sa
-    Question/Choice tables (na hiwalay na model). Dito nangyayari ang translation.
-    """
     id = serializers.IntegerField(read_only=True)
     question = serializers.CharField()
     category = serializers.ChoiceField(choices=['GenEd', 'ProfEd', 'Major'])
@@ -16,6 +11,12 @@ class QuestionSerializer(serializers.Serializer):
     choices = serializers.ListField(child=serializers.CharField(allow_blank=True), min_length=4, max_length=4)
     answer = serializers.IntegerField(min_value=0, max_value=3)
     explanation = serializers.CharField(required=False, allow_blank=True)
+    department = serializers.CharField(read_only=True, allow_null=True)
+    # Per-choice explanation — parallel array sa `choices`, index-aligned.
+    # Optional: kung hindi ipinasa, tuluyang mag-e-empty strings.
+    choice_explanations = serializers.ListField(
+        child=serializers.CharField(allow_blank=True), required=False, min_length=4, max_length=4
+    )
 
     def to_representation(self, instance):
         choice_objs = list(instance.choices.all())
@@ -28,11 +29,14 @@ class QuestionSerializer(serializers.Serializer):
             'choices': [c.text for c in choice_objs],
             'answer': next((i for i, c in enumerate(choice_objs) if c.is_correct), 0),
             'explanation': instance.explanation,
+            'department': instance.department,
+            'choice_explanations': [c.explanation for c in choice_objs],
         }
 
     def create(self, validated_data):
         choices = validated_data.pop('choices')
         answer = validated_data.pop('answer')
+        choice_explanations = validated_data.pop('choice_explanations', ['', '', '', ''])
         question = Question.objects.create(
             text=validated_data['question'],
             category=validated_data['category'],
@@ -40,9 +44,15 @@ class QuestionSerializer(serializers.Serializer):
             difficulty=validated_data.get('difficulty', 'Medium'),
             explanation=validated_data.get('explanation', ''),
             created_by=self.context['request'].user,
+            department=self.context['request'].user.department if validated_data['category'] == 'Major' else None,
         )
         for i, choice_text in enumerate(choices):
-            Choice.objects.create(question=question, text=choice_text, is_correct=(i == answer))
+            Choice.objects.create(
+                question=question,
+                text=choice_text,
+                is_correct=(i == answer),
+                explanation=choice_explanations[i] if i < len(choice_explanations) else '',
+            )
         return question
 
     def update(self, instance, validated_data):
@@ -51,13 +61,23 @@ class QuestionSerializer(serializers.Serializer):
         instance.subject = validated_data.get('subject', instance.subject)
         instance.difficulty = validated_data.get('difficulty', instance.difficulty)
         instance.explanation = validated_data.get('explanation', instance.explanation)
+        if 'category' in validated_data:
+            instance.department = (
+                self.context['request'].user.department if instance.category == 'Major' else None
+            )
         instance.save()
 
         if 'choices' in validated_data:
             instance.choices.all().delete()
             answer = validated_data.get('answer', 0)
+            choice_explanations = validated_data.get('choice_explanations', ['', '', '', ''])
             for i, choice_text in enumerate(validated_data['choices']):
-                Choice.objects.create(question=instance, text=choice_text, is_correct=(i == answer))
+                Choice.objects.create(
+                    question=instance,
+                    text=choice_text,
+                    is_correct=(i == answer),
+                    explanation=choice_explanations[i] if i < len(choice_explanations) else '',
+                )
         return instance
 
 
@@ -73,8 +93,9 @@ class ExamSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'category', 'status',
             'duration_minutes', 'passing_score', 'is_active',
-            'questions', 'question_ids', 'created_at',
+            'questions', 'question_ids', 'department', 'created_at',
         ]
+        read_only_fields = ['department']
 
 
 class ExamAttemptSerializer(serializers.ModelSerializer):
