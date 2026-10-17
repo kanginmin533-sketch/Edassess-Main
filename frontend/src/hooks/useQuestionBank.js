@@ -51,5 +51,21 @@ export default function useQuestionBank() {
     setQuestions((prev) => prev.filter((q) => q.id !== id));
   }, []);
 
-  return { questions, loading, addQuestion, addQuestions, updateQuestion, removeQuestion };
+  // Bulk delete sa 1 request. category: 'All' | 'GenEd' | 'ProfEd' | 'Major'
+  const removeQuestionsByCategory = useCallback(async (category) => {
+    await questionApi.bulkDeleteQuestions(category);
+    setQuestions((prev) =>
+      category === 'All' ? [] : prev.filter((q) => q.category !== category)
+    );
+  }, []);
+
+  return {
+    questions,
+    loading,
+    addQuestion,
+    addQuestions,
+    updateQuestion,
+    removeQuestion,
+    removeQuestionsByCategory,
+  };
 }

@@ -246,8 +246,15 @@ class InstructorQuestionBulkCreateView(APIView):
 
 
 class InstructorQuestionBulkDeleteView(APIView):
-    """Delete ng maraming question nang sabay. Sariling questions lang ng instructor."""
+    """Delete maraming question nang sabay (1 request). Sariling questions lang ng instructor.
+
+    Body options:
+      {"category": "All" | "GenEd" | "ProfEd" | "Major"}   -> delete by category
+      {"ids": [1, 2, 3]}                                    -> delete specific questions
+    """
     permission_classes = [IsInstructor, CanConfigureExams]
+
+    VALID_CATEGORIES = {c[0] for c in Question.CATEGORY_CHOICES}
 
     def _ids(self, request):
         data = request.data
@@ -258,15 +265,41 @@ class InstructorQuestionBulkDeleteView(APIView):
         return [int(i) for i in raw if str(i).isdigit()]
 
     def post(self, request):
+        data = request.data if not isinstance(request.data, list) else {}
+        category = data.get('category')
         ids = self._ids(request)
-        qs = Question.objects.filter(created_by=request.user, id__in=ids)
+
+        # Laging sariling questions lang ng instructor
+        qs = Question.objects.filter(created_by=request.user)
+
+        if ids:
+            qs = qs.filter(id__in=ids)
+            scope = f'{len(ids)} selected'
+        elif category:
+            if category != 'All':
+                if category not in self.VALID_CATEGORIES:
+                    return Response(
+                        {'detail': f'Invalid category "{category}".'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                qs = qs.filter(category=category)
+            scope = 'all' if category == 'All' else category
+        else:
+            return Response(
+                {'detail': 'Provide "category" or "ids".'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         deleted = qs.count()
+        # Choices ay cascade-deleted; ang Exam.questions (M2M) links ay kusang natatanggal.
         qs.delete()
+
         if deleted:
             log_activity(
-                request, 'question.bulk_delete', f'Deleted {deleted} question(s) from the question bank',
+                request, 'question.bulk_delete',
+                f'Deleted {deleted} question(s) from the question bank ({scope})',
                 category='exams',
             )
-        return Response({'deleted': deleted, 'ids': ids}, status=status.HTTP_200_OK)
+        return Response({'deleted': deleted}, status=status.HTTP_200_OK)
 
-    delete = post  
+    delete = post

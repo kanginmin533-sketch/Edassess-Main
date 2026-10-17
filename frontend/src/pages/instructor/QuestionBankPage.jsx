@@ -198,7 +198,7 @@ const EMPTY_FORM = {
 };
 
 export default function QuestionBankPage() {
-  const { questions, loading, addQuestion, addQuestions, updateQuestion, removeQuestion } = useQuestionBank();
+  const { questions, loading, addQuestion, addQuestions, updateQuestion, removeQuestion, removeQuestionsByCategory } = useQuestionBank();
   const { user } = useAuthStore();
 
   const [search, setSearch]       = useState('');
@@ -219,6 +219,7 @@ export default function QuestionBankPage() {
   const [editItem,  setEditItem]  = useState(null);
   const [form, setForm]           = useState(EMPTY_FORM);
   const [saving, setSaving]       = useState(false);
+  const [deleting, setDeleting]   = useState(false);
 
   // Sariling questions lang ang binabalik ng backend para sa instructor.
   const filtered = questions.filter((q) => {
@@ -296,6 +297,46 @@ export default function QuestionBankPage() {
     }
   };
 
+  // Delete All:
+  //  - no search text  → ONE bulk request for the selected category ('All' = everything)
+  //  - search text set → deletes only the matching rows, one request per row
+  //    (the bulk endpoint only understands categories, not search results)
+  const handleDeleteAll = async () => {
+    const searching = search.trim().length > 0;
+    const categoryCount = filter === 'All'
+      ? questions.length
+      : questions.filter((q) => q.category === filter).length;
+    const count = searching ? filtered.length : categoryCount;
+    if (count === 0) return;
+
+    const what = searching
+      ? `the ${count} question(s) matching your search`
+      : filter === 'All' ? `ALL ${count} questions` : `all ${count} ${filter} questions`;
+    if (!confirm(`Delete ${what}? They will also be removed from any exam that includes them. This cannot be undone.`)) return;
+
+    setDeleting(true);
+    try {
+      if (!searching) {
+        await removeQuestionsByCategory(filter);
+      } else {
+        let failed = 0;
+        for (const q of [...filtered]) {
+          try {
+            await removeQuestion(q.id);
+          } catch (err) {
+            console.error(err);
+            failed++;
+          }
+        }
+        if (failed > 0) alert(`${failed} question(s) could not be deleted. Please try again.`);
+      }
+    } catch (err) {
+      alert(apiError(err, 'Failed to delete questions.'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // ---------- PDF import flow ----------
 
   const closeImport = () => {
@@ -362,6 +403,8 @@ export default function QuestionBankPage() {
     return <div style={{ padding: 40, textAlign: 'center' }}>Loading question bank...</div>;
   }
 
+  const deleteLabel = search.trim() ? 'Delete Shown' : filter === 'All' ? 'Delete All' : `Delete ${filter}`;
+
   return (
     <>
       <div className="inst-topbar">
@@ -370,6 +413,14 @@ export default function QuestionBankPage() {
           <p>{questions.length} questions total — add manually or import from PDF. Major questions are tagged to one {user?.department || ''} major.</p>
         </div>
         <div className="inst-topbar-right">
+          <button
+            className="inst-btn inst-btn-secondary inst-btn-sm"
+            onClick={handleDeleteAll}
+            disabled={deleting || filtered.length === 0}
+            style={{ color: 'var(--inst-danger)' }}
+          >
+            <Trash2 size={13} /> {deleting ? 'Deleting...' : deleteLabel}
+          </button>
           <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={() => setShowImport(true)}>
             <Upload size={13} /> Import from PDF
           </button>
