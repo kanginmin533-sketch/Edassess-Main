@@ -1,141 +1,213 @@
-# EduAssess — About Page
-**Web-Based Mandatory Access Control (MAC) Reviewer System**  
-College of Teacher Education · PRMSU IBA
-
----
-
-## Folder Structure
-
-```
-eduassess/
-├── index.html                        # Root HTML template (Vite entry)
-├── package.json                      # Dependencies & scripts
-├── vite.config.js                    # Vite + React plugin config
-│
-└── src/
-    ├── main.jsx                      # React DOM entry point
-    ├── App.jsx                       # Root component — assembles all sections
-    │
-    ├── components/
-    │   ├── Navbar.jsx                # Fixed navigation bar
-    │   ├── Hero.jsx                  # Split-panel hero section
-    │   ├── MissionVision.jsx         # Mission & Vision cards
-    │   ├── InstitutionSection.jsx    # Institutional background + stat card
-    │   ├── MacSection.jsx            # MAC framework 6-card grid
-    │   ├── PlatformSection.jsx       # Platform features + visual panel
-    │   ├── CTESection.jsx            # CTE values banner
-    │   ├── CTASection.jsx            # Register call-to-action
-    │   └── Footer.jsx                # Site footer
-    │
-    └── styles/
-        ├── globals.css               # CSS variables, resets, shared utilities
-        ├── Navbar.css                # Navbar styles
-        ├── Hero.css                  # Hero section styles
-        ├── MissionVision.css         # Mission & Vision styles
-        ├── InstitutionSection.css    # Institution section styles
-        ├── MacSection.css            # MAC section styles
-        ├── PlatformSection.css       # Platform section styles
-        ├── CTESection.css            # CTE section styles
-        └── CTASection.css            # CTA section + Footer styles
-```
-
----
-
-## Getting Started
-
-### Prerequisites
-- Node.js v18 or higher
-- npm v9 or higher
-
-### Installation
-
-```bash
-# 1. Navigate into the project folder
-cd eduassess
-
-# 2. Install dependencies
-npm install
-# Core Navigation & State Management
-npm install react-router-dom zustand axios
-
-# UI & Styling
-npm install lucide-react    # Para sa mga icons (Mail, Key,)
-npm install framer-motion   # Para sa mga smooth animations/transitions
-
-# Core Web Framework
-pip install django djangorestframework django-cors-headers
-
-# AI  (Alternative to dlib)
-pip install mediapipe opencv-python numpy
-
-# Database & Utilities
-pip install psycopg2  # Para sa PostgreSQL/pgAdmin
-pip install pillow    # Para sa paghandle ng images
-pip install python-dotenv # Para sa pagtatago ng API keys/Email passwords
-
-# 3. Start the development server
-npm run dev
-```
-
-The app will be available at `http://localhost:5173`.
-
-### Build for Production
-
-```bash
-npm run build
-```
-
-Output will be in the `dist/` folder.
-
-### Preview Production Build
-
-```bash
-npm run preview
-```
-
----
-
-## Component Overview
-
-| Component | Description |
-|---|---|
-| `Navbar` | Fixed top nav with anchor links and Register CTA |
-| `Hero` | Two-panel hero — dark navy left, warm sand right |
-| `MissionVision` | Side-by-side Mission (dark) and Vision (light) cards |
-| `InstitutionSection` | PRMSU IBA background text + stats card + note |
-| `MacSection` | Six-card grid explaining the MAC security model |
-| `PlatformSection` | Feature list with icon tiles + system overview panel |
-| `CTESection` | CTE values inside a dark navy banner |
-| `CTASection` | Full-width registration call-to-action |
-| `Footer` | Brand, copyright, and utility links |
-
----
-
-## Design Tokens (CSS Variables)
-
-Defined in `src/styles/globals.css`:
-
-| Variable | Value | Usage |
-|---|---|---|
-| `--navy` | `#1B2C4E` | Primary brand color |
-| `--navy-deep` | `#111C33` | Dark backgrounds |
-| `--gold` | `#C89B3C` | Accent color |
-| `--gold-light` | `#E8C06A` | Hover / italic highlights |
-| `--gold-pale` | `#F5E9CC` | Subtle gold tint |
-| `--sand` | `#F8F4EE` | Page background |
-| `--white` | `#FFFFFF` | Card backgrounds |
-| `--muted` | `#6B6B6B` | Body text |
-| `--rule` | `#D6CFC4` | Borders and dividers |
-
----
-
-## Tech Stack
-
-- **React 18** — UI component library
-- **Vite 5** — Development server and bundler
-- **Plain CSS Modules** — Per-component scoped stylesheets
-- **Google Fonts** — Cormorant Garamond + DM Sans
-
----
-
-*EduAssess is an internal academic platform for PRMSU IBA College of Teacher Education.*
+EDAssess2
+├── backend
+│   ├── accounts
+│   │   ├── management
+│   │   │   ├── commands
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── create_instructor.py
+│   │   │   │   └── fix_sequence.py
+│   │   │   └── __init__.py
+│   │   ├── migrations
+│   │   │   ├── __init__.py
+│   │   │   ├── 0001_initial.py
+│   │   │   ├── 0002_rolepermission.py
+│   │   │   ├── 0003_systemsettings.py
+│   │   │   ├── 0004_user_department.py
+│   │   │   ├── 0005_alter_user_department.py
+│   │   │   ├── 0006_user_major_activitylog.py
+│   │   │   └── 0007_departmentpermission.py
+│   │   ├── __init__.py
+│   │   ├── activity.py
+│   │   ├── admin.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── permissions.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   └── views.py
+│   ├── config
+│   │   ├── __init__.py
+│   │   ├── asgi.py
+│   │   ├── settings.py
+│   │   ├── urls.py
+│   │   └── wsgi.py
+│   ├── exams
+│   │   ├── migrations
+│   │   │   ├── __init__.py
+│   │   │   ├── 0001_initial.py
+│   │   │   ├── 0002_examconfig.py
+│   │   │   ├── 0003_exam_category_exam_status.py
+│   │   │   ├── 0004_remove_question_exam_exam_questions_and_more.py
+│   │   │   ├── 0005_question_explanation_question_subject_and_more.py
+│   │   │   ├── 0006_examattempt_detail.py
+│   │   │   ├── 0007_exam_department_question_department.py
+│   │   │   ├── 0008_choice_explanation.py
+│   │   │   ├── 0009_alter_choice_text.py
+│   │   │   ├── 0010_alter_exam_department_alter_question_department.py
+│   │   │   └── 0011_exam_major_question_major.py
+│   │   ├── __init__.py
+│   │   ├── admin.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   └── views.py
+│   ├── fixtures
+│   ├── media
+│   │   └── review_modules
+│   │       ├── MAJOR-BTLEDCIT.pdf
+│   │       ├── MAJOR-BTLEDCIT_aTR30uQ.pdf
+│   │       ├── ProfEd_150-Item_Mock_Exam.pdf
+│   │       ├── ProfEd_150-Item_Mock_Exam_BmGMhCk.pdf
+│   │       └── ProfEd_150-Item_Mock_Exam_cpMVmfs.pdf
+│   ├── modules
+│   │   ├── migrations
+│   │   │   ├── __init__.py
+│   │   │   ├── 0001_initial.py
+│   │   │   ├── 0002_announcement.py
+│   │   │   ├── 0003_module_department.py
+│   │   │   └── 0004_module_major_alter_module_department.py
+│   │   ├── __init__.py
+│   │   ├── admin.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   └── views.py
+│   ├── reports
+│   │   ├── migrations
+│   │   │   └── __init__.py
+│   │   ├── __init__.py
+│   │   ├── admin.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   └── views.py
+│   ├── .env
+│   ├── .env.example
+│   ├── edassess_db_before_user_migration.dump
+│   ├── manage.py
+│   └── requirements.txt
+├── frontend
+│   ├── public
+│   │   ├── favicon.svg
+│   │   └── icons.svg
+│   ├── src
+│   │   ├── api
+│   │   │   ├── accessApi.js
+│   │   │   ├── activityApi.js
+│   │   │   ├── adminApi.js
+│   │   │   ├── authApi.js
+│   │   │   ├── axiosInstance.js
+│   │   │   ├── examApi.js
+│   │   │   ├── modulesApi.js
+│   │   │   ├── questionApi.js
+│   │   │   ├── reportApi.js
+│   │   │   ├── settingsApi.js
+│   │   │   └── userApi.js
+│   │   ├── assets
+│   │   │   ├── CTELogo.jpg
+│   │   │   └── prmsu.jpg
+│   │   ├── auth
+│   │   │   ├── ProtectedRoute.jsx
+│   │   │   ├── RoleGuard.jsx
+│   │   │   ├── SuperAdminGuard.jsx
+│   │   │   └── useAuthStore.js
+│   │   ├── components
+│   │   │   ├── ui
+│   │   │   │   ├── Button.jsx
+│   │   │   │   ├── Input.jsx
+│   │   │   │   ├── Modal.jsx
+│   │   │   │   └── Spinner.jsx
+│   │   │   ├── AuthModal.jsx
+│   │   │   ├── CTASection.jsx
+│   │   │   ├── CTESection.jsx
+│   │   │   ├── DeptPicker.jsx
+│   │   │   ├── FeaturesShowcase.jsx
+│   │   │   ├── Footer.jsx
+│   │   │   ├── Hero.jsx
+│   │   │   ├── Icon3D.jsx
+│   │   │   ├── MacSection.jsx
+│   │   │   ├── MajorPicker.jsx
+│   │   │   ├── MissionVision.jsx
+│   │   │   ├── Navbar.jsx
+│   │   │   ├── PlatformSection.jsx
+│   │   │   ├── ProductPreview.jsx
+│   │   │   └── ProfileModal.jsx
+│   │   ├── hooks
+│   │   │   ├── useAuth.js
+│   │   │   ├── useExam.js
+│   │   │   ├── useExamHistory.js
+│   │   │   ├── useFetch.js
+│   │   │   ├── useQuestionBank.js
+│   │   │   └── useReviewModules.js
+│   │   ├── pages
+│   │   │   ├── admin
+│   │   │   │   ├── activity
+│   │   │   │   ├── AccessControlPage.jsx
+│   │   │   │   ├── ActivityLogPage.jsx
+│   │   │   │   ├── admin.css
+│   │   │   │   ├── AdminDashboard.jsx
+│   │   │   │   ├── AdminLayout.jsx
+│   │   │   │   ├── ExamConfigPage.jsx
+│   │   │   │   ├── index.js
+│   │   │   │   ├── ModulesPage.jsx
+│   │   │   │   ├── ReportsPage.jsx
+│   │   │   │   ├── SettingsPage.jsx
+│   │   │   │   └── UserPage.jsx
+│   │   │   ├── instructor
+│   │   │   │   ├── AnnouncementsPage.jsx
+│   │   │   │   ├── ExamBuilderPage.jsx
+│   │   │   │   ├── index.js
+│   │   │   │   ├── instructor.css
+│   │   │   │   ├── InstructorDashboard.jsx
+│   │   │   │   ├── InstructorLayout.jsx
+│   │   │   │   ├── ModulesPage.jsx
+│   │   │   │   ├── QuestionBankPage.jsx
+│   │   │   │   └── StudentMonitorPage.jsx
+│   │   │   └── user
+│   │   │       ├── cit.css
+│   │   │       ├── CitUserLayout.jsx
+│   │   │       ├── ExamPage.jsx
+│   │   │       ├── ExamSelectionPage.jsx
+│   │   │       ├── ResultsPage.jsx
+│   │   │       ├── ReviewModulesPage.jsx
+│   │   │       ├── user.css
+│   │   │       ├── user_index.js
+│   │   │       ├── UserAssessmentsPage.jsx
+│   │   │       ├── UserDashboard.jsx
+│   │   │       └── UserLayout.jsx
+│   │   ├── styles
+│   │   │   ├── AuthModal.css
+│   │   │   ├── CTASection.css
+│   │   │   ├── CTESection.css
+│   │   │   ├── dept-theme.css
+│   │   │   ├── FeaturesShowcase.css
+│   │   │   ├── Footer.css
+│   │   │   ├── globals.css
+│   │   │   ├── Hero.css
+│   │   │   ├── MacSection.css
+│   │   │   ├── MissionVision.css
+│   │   │   ├── Navbar.css
+│   │   │   ├── PlatformSection.css
+│   │   │   └── ProductPreview.css
+│   │   ├── utils
+│   │   │   ├── apiError.js
+│   │   │   ├── formatDate.js
+│   │   │   ├── gwa.js
+│   │   │   ├── majors.js
+│   │   │   ├── sanitize.js
+│   │   │   └── validators.js
+│   │   ├── App.css
+│   │   ├── App.jsx
+│   │   ├── index.css
+│   │   └── main.jsx
+│   ├── .env
+│   ├── eslint.config.js
+│   ├── index.html
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── README.md
+│   └── vite.config.js
+└── .gitignore

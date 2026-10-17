@@ -1,6 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
 
 // ── Global Styles ──────────────────────────────────────────────────────────
 import './styles/globals.css';
@@ -9,8 +8,9 @@ import './styles/globals.css';
 import useAuthStore from './auth/useAuthStore';
 import ProtectedRoute from './auth/ProtectedRoute';
 import RoleGuard from './auth/RoleGuard';
+import SuperAdminGuard from './auth/SuperAdminGuard';
 
-// ── Landing Page Components (UNTOUCHED) ────────────────────────────────────
+// ── Landing Page Components ────────────────────────────────────────────────
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import AuthModal from './components/AuthModal';
@@ -24,8 +24,7 @@ import CTASection from './components/CTASection';
 import Footer from './components/Footer';
 
 // ── Admin Pages ────────────────────────────────────────────────────────────
-// NOTE: aliased to AdminModulesPage because Instructor also exports a
-// component named `ModulesPage` — importing both unaliased would collide.
+// Naka-alias ang ModulesPage dahil may kaparehong export ang Instructor.
 import {
   AdminLayout,
   AdminDashboard,
@@ -36,6 +35,8 @@ import {
   SettingsPage,
   ModulesPage as AdminModulesPage,
 } from './pages/admin';
+// Direkta ang import para hindi na kailangang galawin ang pages/admin/index.js
+import ActivityLogPage from './pages/admin/ActivityLogPage';
 
 // ── Instructor Pages ───────────────────────────────────────────────────────
 import {
@@ -51,7 +52,6 @@ import {
 // ── User / Student Pages ───────────────────────────────────────────────────
 import {
   UserLayout,
-  CitUserLayout,
   UserDashboard,
   UserAssessmentsPage,
   ResultsPage,
@@ -67,15 +67,6 @@ function ScrollToTop() {
     window.scrollTo(0, 0);
   }, [pathname]);
   return null;
-}
-
-// ── Department-aware student layout switch ─────────────────────────────────
-// RoleGuard sa taas nito ay nag-che-check lang ng role ('user'). Dito naman
-// dine-decide kung aling shell/sidebar ang ipapakita batay sa department —
-// parehong routes/pages pa rin sa ilalim, iba lang ang layout.
-function StudentDashboardRouter() {
-  const { user } = useAuthStore();
-  return user?.department === 'CIT' ? <CitUserLayout /> : <UserLayout />;
 }
 
 // ── Public Landing Page ────────────────────────────────────────────────────
@@ -129,10 +120,12 @@ export default function App() {
         >
           <Route index element={<AdminDashboard />} />
           <Route path="users" element={<UserPage />} />
-          <Route path="exams" element={<ExamConfigPage />} />
+          <Route path="exams" element={<SuperAdminGuard><ExamConfigPage /></SuperAdminGuard>} />
+          {/* Super admin: global + CIT/CTE. Department admin: sariling department lang (hinahandle ng page + backend). */}
           <Route path="access" element={<AccessControlPage />} />
+          <Route path="activity" element={<SuperAdminGuard><ActivityLogPage /></SuperAdminGuard>} />
           <Route path="reports" element={<ReportsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings" element={<SuperAdminGuard><SettingsPage /></SuperAdminGuard>} />
           <Route path="modules" element={<AdminModulesPage />} />
         </Route>
 
@@ -161,7 +154,7 @@ export default function App() {
           element={
             <ProtectedRoute>
               <RoleGuard role="user">
-                <StudentDashboardRouter />
+                <UserLayout />
               </RoleGuard>
             </ProtectedRoute>
           }

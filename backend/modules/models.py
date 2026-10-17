@@ -1,7 +1,7 @@
 # backend/modules/models.py
 from django.conf import settings
 from django.db import models
-from accounts.models import User
+from accounts.models import User, MAJOR_CHOICES
 
 
 class Module(models.Model):
@@ -17,6 +17,9 @@ class Module(models.Model):
     department = models.CharField(
         max_length=10, choices=User.DEPARTMENT_CHOICES, blank=True, null=True
     )
+    # Optional. Major modules na may major tag = para lang sa students ng major na iyon.
+    # Walang tag = bukas sa buong department (gaya ng dati).
+    major = models.CharField(max_length=40, choices=MAJOR_CHOICES, blank=True, null=True)
     file = models.FileField(upload_to='review_modules/')
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

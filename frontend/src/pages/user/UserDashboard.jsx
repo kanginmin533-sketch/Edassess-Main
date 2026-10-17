@@ -1,10 +1,9 @@
-// 📁 frontend/src/pages/user/UserDashboard.jsx
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, ClipboardList, BarChart2, TrendingUp, CheckCircle, Award, Zap, AlertCircle } from 'lucide-react';
+import { BookOpen, ClipboardList, BarChart2, TrendingUp, CheckCircle, Clock, Zap, Award, AlertCircle } from 'lucide-react';
 import useAuthStore from '../../auth/useAuthStore';
 import useExamHistory from '../../hooks/useExamHistory';
-import { announcementApi } from '../../api/modulesApi';
+import { LET_CATEGORIES, GWA_WEIGHTS, PASSING_GWA, computeGwa, fmt } from '../../utils/gwa';
 
 const CATEGORY_BADGE = {
   GenEd:  'u-badge u-badge-success',
@@ -21,71 +20,11 @@ function performanceLevel(pct) {
   return { label: 'Needs Improvement', color: 'var(--user-danger)', bg: 'var(--user-danger-soft)' };
 }
 
-const LET_CATEGORIES = ['GenEd', 'ProfEd', 'Major'];
-
-// The actual PRC/LET passing rule: general average of the three areas must be
-// at least 75%, AND no single area may fall below 50% — a high average does
-// not save you if one area is a straight failure. This combines the latest
-// attempt per category (history is newest-first from useExamHistory).
-function getOverallLetStanding(history) {
-  const latestByCategory = {};
-  history.forEach((a) => {
-    if (LET_CATEGORIES.includes(a.short) && !latestByCategory[a.short]) {
-      latestByCategory[a.short] = a;
-    }
-  });
-
-  const missing = LET_CATEGORIES.filter((c) => !latestByCategory[c]);
-  if (missing.length > 0) {
-    return { complete: false, missing, latestByCategory };
-  }
-
-  const scores = LET_CATEGORIES.map((c) => latestByCategory[c].percentage);
-  const combinedAverage = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
-  const failedAreas = LET_CATEGORIES.filter((c) => latestByCategory[c].percentage < 50);
-  const passed = combinedAverage >= 75 && failedAreas.length === 0;
-
-  return { complete: true, combinedAverage, passed, failedAreas, latestByCategory };
-}
-
 export default function UserDashboard() {
   const { user } = useAuthStore();
   const navigate  = useNavigate();
   const [greeting, setGreeting] = useState('');
   const { history, loading, getSubjectSummary } = useExamHistory();
-
-  // ── Announcements (live from instructor) ──────────────────────────────
-  const [announcements, setAnnouncements] = useState([]);
-  const [annLoading, setAnnLoading] = useState(true);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadAnnouncements() {
-      try {
-        const data = await announcementApi.getAnnouncements();
-        if (isMounted) setAnnouncements(data);
-      } catch (err) {
-        console.error('Failed to load announcements:', err);
-      } finally {
-        if (isMounted) setAnnLoading(false);
-      }
-    }
-
-    loadAnnouncements();
-
-    // Poll every 30s so a newly-posted announcement shows up
-    // automatically even if the student stays on this page.
-    const interval = setInterval(loadAnnouncements, 30000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []);
-
-  const sortedAnnouncements = [...announcements]
-    .sort((a, b) => b.pinned - a.pinned || new Date(b.date) - new Date(a.date));
 
   useEffect(() => {
     const h = new Date().getHours();
@@ -106,21 +45,12 @@ export default function UserDashboard() {
   const avgScore = history.length > 0
     ? Math.round(history.reduce((sum, h) => sum + h.percentage, 0) / history.length)
     : null;
-  const bestScore = history.length > 0
-    ? Math.max(...history.map((h) => h.percentage))
-    : null;
 
-  const letStanding = getOverallLetStanding(history);
-  const categoriesCompleted = LET_CATEGORIES.filter((c) => letStanding.latestByCategory?.[c]).length;
-
-  // Removed the old "Modules" and "Study Time" cards — both were hardcoded
-  // placeholder numbers (8/24, 14h) with no backing data. These four are all
-  // computed straight from real exam attempt history.
   const STATS = [
-    { label: 'Exams Taken', value: String(history.length),                    sub: `${attemptsThisWeek} this week`,       icon: ClipboardList, color: 'blue'   },
-    { label: 'Avg. Score',  value: avgScore !== null ? `${avgScore}%` : '—',  sub: 'All categories',                      icon: TrendingUp,    color: 'green'  },
-    { label: 'Best Score',  value: bestScore !== null ? `${bestScore}%` : '—', sub: 'Personal best across all attempts',  icon: Award,         color: 'purple' },
-    { label: 'LET Areas',   value: `${categoriesCompleted}/3`,                sub: 'Completed at least once',             icon: CheckCircle,   color: 'amber'  },
+    { label: 'Exams Taken',       value: String(history.length),                sub: `${attemptsThisWeek} this week`, icon: ClipboardList, color: 'blue'   },
+    { label: 'Avg. Score',        value: avgScore !== null ? `${avgScore}%` : '—', sub: 'All categories',              icon: TrendingUp,    color: 'green'  },
+    { label: 'Modules Completed', value: '8',                                   sub: 'of 24 total',                   icon: CheckCircle,   color: 'purple' },
+    { label: 'Study Time',        value: '14h',                                 sub: 'Total logged',                  icon: Clock,         color: 'amber'  },
   ];
 
   const recentScores = history.slice(0, 5).map((h) => ({
@@ -129,6 +59,9 @@ export default function UserDashboard() {
     date: new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
     category: h.short,
   }));
+
+  // Weighted GWA: GenEd 20% + ProfEd 40% + Major 40%, passing 75%
+  const letStanding = computeGwa(history);
 
   if (loading) {
     return <div style={{ padding: 40, textAlign: 'center' }}>Loading your dashboard...</div>;
@@ -145,40 +78,12 @@ export default function UserDashboard() {
         <div className="user-topbar-right">
           <span className="user-topbar-badge">
             <span style={{ width: 7, height: 7, background: 'var(--user-accent)', borderRadius: '50%', display: 'inline-block' }} />
-            Student
+            Student{user?.department ? ` · ${user.department}` : ''}
           </span>
         </div>
       </div>
 
       <div className="user-content">
-
-        {/* ── Announcements from instructor ── */}
-        {!annLoading && sortedAnnouncements.length > 0 && (
-          <div className="user-card" style={{ marginBottom: 24 }}>
-            <div className="user-card-header">
-              <div>
-                <h3>Announcements</h3>
-                <p>Latest updates from your instructor</p>
-              </div>
-            </div>
-            <div className="user-card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {sortedAnnouncements.slice(0, 3).map((a) => (
-                <div key={a.id} style={{
-                  padding: '12px 14px',
-                  borderRadius: 'var(--user-radius)',
-                  background: a.pinned ? 'var(--user-amber-soft)' : 'var(--user-bg)',
-                  border: `1px solid ${a.pinned ? 'rgba(217,119,6,0.25)' : 'var(--user-border)'}`,
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13.5 }}>{a.title}</span>
-                    <span style={{ fontSize: 11, color: 'var(--user-text-muted)' }}>{a.date}</span>
-                  </div>
-                  <p style={{ margin: 0, fontSize: 12.5, color: 'var(--user-text-sub)', lineHeight: 1.5 }}>{a.body}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* ── Quick Actions ── */}
         <div className="quick-actions">
@@ -224,12 +129,12 @@ export default function UserDashboard() {
           ))}
         </div>
 
-        {/* ── Overall LET Standing (PRC passing rule) ── */}
+        {/* ── Overall GWA ── */}
         <div className="user-card" style={{ marginBottom: 24 }}>
           <div className="user-card-header">
             <div>
               <h3>Overall LET Standing</h3>
-              <p>PRC rule: 75% general average, with no area below 50%</p>
+              <p>GWA = GenEd 20% + ProfEd 40% + Major 40% · passing {PASSING_GWA}%</p>
             </div>
           </div>
 
@@ -242,7 +147,7 @@ export default function UserDashboard() {
                     Standing not yet available
                   </p>
                   <p style={{ margin: 0, fontSize: 12.5, color: 'var(--user-text-sub)', lineHeight: 1.6 }}>
-                    Take a simulation for each of the three LET areas to see your overall standing. Still missing:{' '}
+                    Take a simulation for each of the three LET areas to see your overall GWA. Still missing:{' '}
                     <strong>{letStanding.missing.join(', ')}</strong>.
                   </p>
                 </div>
@@ -264,17 +169,17 @@ export default function UserDashboard() {
                     </p>
                     <p style={{ margin: 0, fontSize: 12.5, color: 'var(--user-text-sub)' }}>
                       {letStanding.passed
-                        ? `Combined average of ${letStanding.combinedAverage}% across GenEd, ProfEd, and Major, with every area at 50% or above.`
+                        ? `GWA of ${fmt(letStanding.gwa)}% — weighted GenEd 20%, ProfEd 40%, Major 40%.`
                         : letStanding.failedAreas.length > 0
-                          ? `${letStanding.failedAreas.join(' and ')} ${letStanding.failedAreas.length > 1 ? 'are' : 'is'} below the 50% minimum — this fails the standing regardless of average.`
-                          : `Combined average is ${letStanding.combinedAverage}%, below the required 75%.`}
+                          ? `${letStanding.failedAreas.join(' and ')} ${letStanding.failedAreas.length > 1 ? 'are' : 'is'} below the 50% minimum — this fails the standing regardless of GWA.`
+                          : `GWA is ${fmt(letStanding.gwa)}%, below the required ${PASSING_GWA}%.`}
                     </p>
                   </div>
                   <div style={{ textAlign: 'center', flexShrink: 0 }}>
                     <div style={{ fontSize: 26, fontWeight: 800, color: letStanding.passed ? 'var(--user-accent)' : 'var(--user-danger)', lineHeight: 1 }}>
-                      {letStanding.combinedAverage}%
+                      {fmt(letStanding.gwa)}%
                     </div>
-                    <div style={{ fontSize: 10.5, color: 'var(--user-text-muted)', marginTop: 2 }}>Combined avg.</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--user-text-muted)', marginTop: 2 }}>Overall GWA</div>
                   </div>
                 </div>
 
@@ -293,6 +198,9 @@ export default function UserDashboard() {
                         </div>
                         <div style={{ fontSize: 20, fontWeight: 800, color: isFailingArea ? 'var(--user-danger)' : 'var(--user-text)' }}>
                           {attempt.percentage}%
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--user-text-muted)', marginTop: 2 }}>
+                          × {GWA_WEIGHTS[cat]} = {fmt(letStanding.weighted[cat])} pts
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--user-text-muted)', marginTop: 2 }}>
                           {new Date(attempt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -321,6 +229,7 @@ export default function UserDashboard() {
             </div>
           ) : (
             <div className="user-card-body">
+              {/* Highlight callouts */}
               <div style={{ display: 'grid', gridTemplateColumns: weakest ? '1fr 1fr' : '1fr', gap: 12, marginBottom: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'var(--user-accent-soft)', borderRadius: 'var(--user-radius)', border: '1px solid rgba(22,163,74,0.15)' }}>
                   <Award size={20} style={{ color: 'var(--user-accent)', flexShrink: 0 }} />
@@ -340,6 +249,7 @@ export default function UserDashboard() {
                 )}
               </div>
 
+              {/* Per-subject breakdown */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {subjectRows.map(({ subject, correct, total, percentage, attempts }) => {
                   const level = performanceLevel(percentage);

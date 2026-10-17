@@ -1,16 +1,19 @@
+# backend/accounts/urls.py
 from django.urls import path
 from .views import (
     LoginView,
     RegisterView,
     LogoutView,
     MeView,
+    MyPermissionsView,
     AdminUserListView,
     AdminCreateUserView,
     AdminUserDetailView,
     AdminUserStatusView,
     RolePermissionView,
-    MyPermissionsView,
     SystemSettingsView,
+    ActivityLogView,
+    DepartmentPermissionView,
 )
 
 urlpatterns = [
@@ -22,6 +25,8 @@ urlpatterns = [
     path('auth/logout/', LogoutView.as_view()),
     path('auth/me', MeView.as_view(), name='me'),
     path('auth/me/', MeView.as_view()),
+    path('auth/my-permissions', MyPermissionsView.as_view(), name='my-permissions'),
+    path('auth/my-permissions/', MyPermissionsView.as_view()),
 
     path('admin/users', AdminUserListView.as_view(), name='admin-user-list'),
     path('admin/users/', AdminUserListView.as_view()),
@@ -34,12 +39,21 @@ urlpatterns = [
     path('admin/users/<int:pk>/delete/', AdminUserDetailView.as_view()),
     path('admin/users/<int:pk>/status', AdminUserStatusView.as_view(), name='admin-user-status'),
     path('admin/users/<int:pk>/status/', AdminUserStatusView.as_view()),
+    # GET sa isang user (adminApi.getUserById)
+    path('admin/users/<int:pk>', AdminUserDetailView.as_view(), name='admin-user-detail'),
+    path('admin/users/<int:pk>/', AdminUserDetailView.as_view()),
 
     path('admin/role-permissions', RolePermissionView.as_view(), name='role-permissions'),
     path('admin/role-permissions/', RolePermissionView.as_view()),
-    path('auth/my-permissions', MyPermissionsView.as_view(), name='my-permissions'),
-    path('auth/my-permissions/', MyPermissionsView.as_view()),
+
+    # Department admin: sariling department lang. Super admin: kahit alin (?department=CIT)
+    path('admin/department-permissions', DepartmentPermissionView.as_view(), name='department-permissions'),
+    path('admin/department-permissions/', DepartmentPermissionView.as_view()),
 
     path('admin/settings', SystemSettingsView.as_view(), name='system-settings'),
     path('admin/settings/', SystemSettingsView.as_view()),
+
+    # Super admin lang
+    path('admin/activity-log', ActivityLogView.as_view(), name='activity-log'),
+    path('admin/activity-log/', ActivityLogView.as_view()),
 ]

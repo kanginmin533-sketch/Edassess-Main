@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Search, UserPlus, Edit2, Trash2, X, Eye, EyeOff, RefreshCw, Loader2 } from 'lucide-react';
-import { adminApi } from "../../api/adminApi";
+import { adminApi } from '../../api/adminApi';
+import useAuthStore from '../../auth/useAuthStore';
 
-const CREATABLE_ROLES = ['instructor', 'admin'];
 const DEPARTMENTS = [
-  { value: 'CIT', label: 'CIT', full: 'College of Information Technology' },
+  { value: 'CIT', label: 'CIT', full: 'College of Industrial Technology' },
   { value: 'CTE', label: 'CTE', full: 'College of Teacher Education' },
 ];
 
@@ -19,7 +19,6 @@ const STATUS_BADGE = {
   inactive: 'badge badge-warning',
 };
 
-// department: '' lang kapag hindi pa napili — required kapag role === 'instructor'
 const EMPTY_FORM = { name: '', email: '', role: 'instructor', department: '', password: '' };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -31,6 +30,10 @@ function generatePassword() {
 }
 
 export default function UserPage() {
+  const { user: me } = useAuthStore();
+  const isSuper = me?.role === 'admin' && !me?.department; // super admin = admin na walang department
+  const creatableRoles = isSuper ? ['instructor', 'admin'] : ['instructor'];
+
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [users, setUsers] = useState([]);
@@ -43,7 +46,13 @@ export default function UserPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // Fetch Users on Mount
+  const deptBtnStyle = (active) => ({
+    flex: 1, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+    border: `1px solid ${active ? 'var(--admin-accent, #0f172a)' : 'var(--admin-border, #cbd5e1)'}`,
+    background: active ? 'var(--admin-accent-soft, #e2e8f0)' : 'var(--admin-bg-card, #fff)',
+    color: 'var(--admin-text)', fontWeight: active ? 700 : 500,
+  });
+
   useEffect(() => {
     fetchUsers();
   }, []);
@@ -54,11 +63,10 @@ export default function UserPage() {
       const data = await adminApi.getUsers();
       const list = Array.isArray(data) ? data : (data.users || data.results || []);
 
-      // Normalize user fields to safely display names
-      const normalizedList = list.map(u => ({
+      const normalizedList = list.map((u) => ({
         ...u,
         name: u.name || u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || 'No Name',
-        status: u.status || (u.is_active ? 'active' : 'inactive')
+        status: u.status || (u.is_active ? 'active' : 'inactive'),
       }));
 
       setUsers(normalizedList);
@@ -85,7 +93,7 @@ export default function UserPage() {
       await adminApi.deleteUser(id);
       setUsers((prev) => prev.filter((u) => u.id !== id));
     } catch (err) {
-      alert(err.response?.data?.detail || err.message || 'Failed to delete user.');
+      alert(err.response?.data?.message || err.response?.data?.detail || err.message || 'Failed to delete user.');
     }
   };
 
@@ -97,7 +105,7 @@ export default function UserPage() {
         prev.map((u) => (u.id === user.id ? { ...u, status: newStatus } : u))
       );
     } catch (err) {
-      alert(err.response?.data?.detail || err.message || 'Failed to update user status.');
+      alert(err.response?.data?.message || err.response?.data?.detail || err.message || 'Failed to update user status.');
     }
   };
 
@@ -110,8 +118,10 @@ export default function UserPage() {
   };
 
   const openEdit = (u) => {
-    if (!CREATABLE_ROLES.includes(u.role)) {
-      alert('Only Instructor and Admin accounts can be edited from this panel.');
+    if (!creatableRoles.includes(u.role)) {
+      alert(isSuper
+        ? 'Only Instructor and Admin accounts can be edited from this panel.'
+        : 'You can only edit Instructor accounts from this panel.');
       return;
     }
     setEditId(u.id);
@@ -132,8 +142,8 @@ export default function UserPage() {
     setFormError('');
     if (!form.name.trim()) return setFormError('Full name is required.');
     if (!EMAIL_RE.test(form.email.trim())) return setFormError('Enter a valid email address.');
-    if (!CREATABLE_ROLES.includes(form.role)) return setFormError('Role must be Instructor or Admin.');
-    if (form.role === 'instructor' && !form.department) return setFormError('Select a department (CIT or CTE) for this instructor.');
+    if (!creatableRoles.includes(form.role)) return setFormError(isSuper ? 'Role must be Instructor or Admin.' : 'Role must be Instructor.');
+    if (isSuper && form.role === 'instructor' && !form.department) return setFormError('Select a department (CIT or CTE) for this instructor.');
     if (!editId && form.password.trim().length < 8) return setFormError('Password must be at least 8 characters.');
 
     const emailTaken = users.some((u) => u.email.toLowerCase() === form.email.trim().toLowerCase() && u.id !== editId);
@@ -141,12 +151,10 @@ export default function UserPage() {
 
     setSaving(true);
 
-    // Split name for standard DRF User serializers (if needed by backend)
     const nameParts = form.name.trim().split(' ');
     const firstName = nameParts[0];
     const lastName = nameParts.slice(1).join(' ') || '';
 
-    // Hybrid payload to guarantee compatibility with DRF serializers
     const payload = {
       name: form.name.trim(),
       fullName: form.name.trim(),
@@ -154,10 +162,11 @@ export default function UserPage() {
       first_name: firstName,
       last_name: lastName,
       email: form.email.trim(),
-      username: form.email.trim(), // Django default user model often uses username
+      username: form.email.trim(),
       role: form.role,
-      department: form.role === 'instructor' ? form.department : null,
-      ...(form.password && { password: form.password })
+      // Super admin: pinili ang department (blank sa admin = super admin). Department admin: sariling department lang.
+      department: isSuper ? (form.department || null) : me.department,
+      ...(form.password && { password: form.password }),
     };
 
     try {
@@ -168,7 +177,7 @@ export default function UserPage() {
         const normalized = {
           ...savedData,
           name: savedData.name || savedData.full_name || form.name.trim(),
-          status: savedData.status || 'active'
+          status: savedData.status || 'active',
         };
 
         setUsers((prev) => prev.map((u) => (u.id === editId ? normalized : u)));
@@ -180,7 +189,7 @@ export default function UserPage() {
           ...savedData,
           name: savedData.name || savedData.full_name || form.name.trim(),
           status: savedData.status || 'active',
-          joined: savedData.joined || new Date().toISOString().split('T')[0]
+          joined: savedData.joined || new Date().toISOString().split('T')[0],
         };
 
         setUsers((prev) => [normalized, ...prev]);
@@ -206,16 +215,23 @@ export default function UserPage() {
     }
   };
 
+  const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--admin-border, #cbd5e1)', fontSize: 13.5, color: 'var(--admin-text)', background: 'var(--admin-bg-card, #fff)' };
+  const labelStyle = { display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--admin-text-sub)', marginBottom: 6 };
+
   return (
     <>
       <div className="admin-topbar">
         <div className="topbar-left">
           <h1>Users</h1>
-          <p>Manage all registered accounts — students, instructors, and admins</p>
+          <p>
+            {isSuper
+              ? 'Manage all registered accounts — students, instructors, and admins'
+              : `Manage ${me?.department} accounts — students and instructors`}
+          </p>
         </div>
         <div className="topbar-right">
           <button className="btn btn-primary btn-sm" onClick={openAdd}>
-            <UserPlus size={13} /> Add Instructor / Admin
+            <UserPlus size={13} /> {isSuper ? 'Add Instructor / Admin' : 'Add Instructor'}
           </button>
         </div>
       </div>
@@ -224,7 +240,7 @@ export default function UserPage() {
         <div className="admin-card">
           <div className="admin-card-header">
             <div style={{ display: 'flex', gap: 8 }}>
-              {['all', 'user', 'instructor', 'admin'].map((role) => (
+              {(isSuper ? ['all', 'user', 'instructor', 'admin'] : ['all', 'user', 'instructor']).map((role) => (
                 <button
                   key={role}
                   className={`btn btn-sm ${filter === role ? 'btn-primary' : 'btn-secondary'}`}
@@ -276,7 +292,7 @@ export default function UserPage() {
                           background: 'var(--admin-accent-soft, #e2e8f0)',
                           color: 'var(--admin-accent, #0f172a)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 12, fontWeight: 700, flexShrink: 0
+                          fontSize: 12, fontWeight: 700, flexShrink: 0,
                         }}>
                           {(u.name || u.email || 'U').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                         </div>
@@ -288,9 +304,9 @@ export default function UserPage() {
                     </td>
                     <td>
                       <span className={ROLE_BADGE[u.role] || 'badge'}>{u.role}</span>
-                      {u.role === 'instructor' && u.department && (
-                        <span className="badge badge-neutral" style={{ marginLeft: 6 }}>{u.department}</span>
-                      )}
+                      {u.role === 'admin' && !u.department
+                        ? <span className="badge badge-purple" style={{ marginLeft: 6 }}>Super</span>
+                        : u.department && <span className="badge badge-neutral" style={{ marginLeft: 6 }}>{u.department}</span>}
                     </td>
                     <td>
                       <button
@@ -306,9 +322,9 @@ export default function UserPage() {
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button
                           className="btn-icon"
-                          title={CREATABLE_ROLES.includes(u.role) ? 'Edit' : 'Only instructor/admin accounts are editable here'}
+                          title={creatableRoles.includes(u.role) ? 'Edit' : 'This account cannot be edited from this panel'}
                           onClick={() => openEdit(u)}
-                          style={{ opacity: CREATABLE_ROLES.includes(u.role) ? 1 : 0.4, cursor: CREATABLE_ROLES.includes(u.role) ? 'pointer' : 'not-allowed' }}
+                          style={{ opacity: creatableRoles.includes(u.role) ? 1 : 0.4, cursor: creatableRoles.includes(u.role) ? 'pointer' : 'not-allowed' }}
                         >
                           <Edit2 size={13} />
                         </button>
@@ -356,7 +372,7 @@ export default function UserPage() {
               padding: '18px 22px', borderBottom: '1px solid var(--admin-border, #e2e8f0)',
             }}>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--admin-text, #0f172a)' }}>
-                {editId ? 'Edit Account' : 'Add Instructor / Admin Account'}
+                {editId ? 'Edit Account' : (isSuper ? 'Add Instructor / Admin Account' : 'Add Instructor Account')}
               </h3>
               <button onClick={closeModal} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--admin-text-muted)', display: 'flex' }}>
                 <X size={18} />
@@ -366,7 +382,7 @@ export default function UserPage() {
             <div style={{ padding: 22 }}>
               {!editId && (
                 <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--admin-text-muted)', lineHeight: 1.6 }}>
-                  Student accounts are created by self-registration on the public site. Use this form only for staff accounts — Instructor or Admin.
+                  Student accounts are created by self-registration on the public site. Use this form only for staff accounts.
                 </p>
               )}
 
@@ -377,76 +393,80 @@ export default function UserPage() {
               )}
 
               <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--admin-text-sub)', marginBottom: 6 }}>Full Name</label>
+                <label style={labelStyle}>Full Name</label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                   placeholder="e.g. Dr. Ana Reyes"
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--admin-border, #cbd5e1)', fontSize: 13.5, color: 'var(--admin-text)', background: 'var(--admin-bg-card, #fff)' }}
+                  style={inputStyle}
                 />
               </div>
 
               <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--admin-text-sub)', marginBottom: 6 }}>Email</label>
+                <label style={labelStyle}>Email</label>
                 <input
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                  placeholder="name@prmsu.edu.ph"
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--admin-border, #cbd5e1)', fontSize: 13.5, color: 'var(--admin-text)', background: 'var(--admin-bg-card, #fff)' }}
+                  placeholder="name@gmail.com"
+                  style={inputStyle}
                 />
               </div>
 
               <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--admin-text-sub)', marginBottom: 6 }}>Role</label>
+                <label style={labelStyle}>Role</label>
                 <select
                   value={form.role}
-                  onChange={(e) => setForm((p) => ({ ...p, role: e.target.value, department: e.target.value === 'instructor' ? p.department : '' }))}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--admin-border, #cbd5e1)', fontSize: 13.5, color: 'var(--admin-text)', background: 'var(--admin-bg-card, #fff)' }}
+                  onChange={(e) => setForm((p) => ({ ...p, role: e.target.value, department: '' }))}
+                  style={inputStyle}
                 >
                   <option value="instructor">Instructor</option>
-                  <option value="admin">Admin</option>
+                  {isSuper && <option value="admin">Admin</option>}
                 </select>
               </div>
 
-              {/* Department — instructor-only. Button-style para malinaw agad ang pinili. */}
-              {form.role === 'instructor' && (
+              {isSuper && (form.role === 'instructor' || form.role === 'admin') && (
                 <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--admin-text-sub)', marginBottom: 6 }}>
-                    Department
+                  <label style={labelStyle}>
+                    Department{' '}
+                    {form.role === 'admin' && (
+                      <span style={{ fontWeight: 400, color: 'var(--admin-text-muted)' }}>· walang pipiliin = Super Admin</span>
+                    )}
                   </label>
                   <div style={{ display: 'flex', gap: 8 }}>
+                    {form.role === 'admin' && (
+                      <button
+                        type="button"
+                        style={deptBtnStyle(form.department === '')}
+                        onClick={() => setForm((p) => ({ ...p, department: '' }))}
+                      >
+                        All (Super)
+                      </button>
+                    )}
                     {DEPARTMENTS.map((d) => (
                       <button
                         key={d.value}
                         type="button"
-                        onClick={() => setForm((p) => ({ ...p, department: d.value }))}
                         title={d.full}
-                        style={{
-                          flex: 1,
-                          padding: '10px 12px',
-                          borderRadius: 8,
-                          border: `1px solid ${form.department === d.value ? 'var(--admin-accent, #0f172a)' : 'var(--admin-border, #cbd5e1)'}`,
-                          background: form.department === d.value ? 'var(--admin-accent-soft, #e2e8f0)' : 'var(--admin-bg-card, #fff)',
-                          color: 'var(--admin-text)',
-                          fontSize: 13,
-                          fontWeight: form.department === d.value ? 700 : 500,
-                          cursor: 'pointer',
-                        }}
+                        style={deptBtnStyle(form.department === d.value)}
+                        onClick={() => setForm((p) => ({ ...p, department: d.value }))}
                       >
                         {d.label}
                       </button>
                     ))}
                   </div>
-                  <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--admin-text-muted)' }}>
-                    {form.department ? DEPARTMENTS.find((d) => d.value === form.department)?.full : 'Select which college this instructor belongs to.'}
-                  </p>
                 </div>
+              )}
+
+              {!isSuper && (
+                <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--admin-text-muted)' }}>
+                  Mapupunta sa department mo ang account: <strong>{me?.department}</strong>
+                </p>
               )}
 
               {!editId && (
                 <div>
-                  <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--admin-text-sub)', marginBottom: 6 }}>
+                  <label style={labelStyle}>
                     Temporary Password <span style={{ fontWeight: 400, color: 'var(--admin-text-muted)' }}>· min 8 characters</span>
                   </label>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -455,7 +475,7 @@ export default function UserPage() {
                         type={showPassword ? 'text' : 'password'}
                         value={form.password}
                         onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-                        style={{ width: '100%', boxSizing: 'border-box', padding: '10px 38px 10px 12px', borderRadius: 8, border: '1px solid var(--admin-border, #cbd5e1)', fontSize: 13.5, color: 'var(--admin-text)', background: 'var(--admin-bg-card, #fff)' }}
+                        style={{ ...inputStyle, padding: '10px 38px 10px 12px' }}
                       />
                       <button
                         type="button"

@@ -6,23 +6,27 @@ import {
 } from 'lucide-react';
 import useAuthStore from '../../auth/useAuthStore';
 import authApi from '../../api/authApi';
+import ProfileModal from '../../components/ProfileModal';
 import './instructor.css';
+import '../../styles/dept-theme.css'; // dapat nasa ilalim ng instructor.css
 
-// Announcements: walang hiwalay na permission key sa matrix (PERMISSION_LABELS),
-// kaya permKey: null dito — laging bisible, hanggang wala pang idinagdag na toggle.
+// permKey = permission sa Access Control na nagpapakita/nagtatago ng nav item.
+// Announcements: wala pang sariling permission, kaya null (laging bisible).
 const NAV_ITEMS = [
-  { to: '/instructor',              label: 'Dashboard',        icon: LayoutDashboard, end: true, permKey: 'viewDashboard' },
-  { to: '/instructor/questions',    label: 'Question Bank',    icon: BookOpen,        permKey: 'configureExams' },
-  { to: '/instructor/exams',        label: 'Exam Builder',     icon: ClipboardList,   permKey: 'configureExams' },
-  { to: '/instructor/modules',      label: 'Review Modules',   icon: FolderOpen,      permKey: 'viewReviewModules' },
-  { to: '/instructor/monitor',      label: 'Student Monitor',  icon: Users,           permKey: 'viewReports' },
-  { to: '/instructor/announcements',label: 'Announcements',    icon: Megaphone,       permKey: null },
+  { to: '/instructor',               label: 'Dashboard',       icon: LayoutDashboard, end: true, permKey: 'viewDashboard' },
+  { to: '/instructor/questions',     label: 'Question Bank',   icon: BookOpen,        permKey: 'configureExams' },
+  { to: '/instructor/exams',         label: 'Exam Builder',    icon: ClipboardList,   permKey: 'configureExams' },
+  { to: '/instructor/modules',       label: 'Review Modules',  icon: FolderOpen,      permKey: 'viewReviewModules' },
+  { to: '/instructor/monitor',       label: 'Student Monitor', icon: Users,           permKey: 'viewReports' },
+  { to: '/instructor/announcements', label: 'Announcements',   icon: Megaphone,       permKey: null },
 ];
 
 export default function InstructorLayout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
-  const [perms, setPerms] = useState(null);
+  const [perms, setPerms] = useState(null); // null = loading pa
+  const [showProfile, setShowProfile] = useState(false);
+  const dept = user?.department === 'CIT' ? 'CIT' : 'CTE';
 
   useEffect(() => {
     async function loadPerms() {
@@ -53,8 +57,7 @@ export default function InstructorLayout() {
   });
 
   return (
-    <div className="inst-shell">
-      {/* ── Sidebar ── */}
+    <div className="inst-shell dept-shell" data-dept={dept}>
       <aside className="inst-sidebar">
         <div className="inst-brand">
           <div className="inst-brand-icon">
@@ -62,7 +65,7 @@ export default function InstructorLayout() {
           </div>
           <div className="inst-brand-text">
             <span>EduAssess</span>
-            <span>Instructor Panel</span>
+            <span>{dept} Instructor Panel</span>
           </div>
         </div>
 
@@ -74,9 +77,7 @@ export default function InstructorLayout() {
                 <NavLink
                   to={to}
                   end={end}
-                  className={({ isActive }) =>
-                    `inst-nav-item ${isActive ? 'active' : ''}`
-                  }
+                  className={({ isActive }) => `inst-nav-item ${isActive ? 'active' : ''}`}
                 >
                   <Icon size={16} />
                   {label}
@@ -89,7 +90,7 @@ export default function InstructorLayout() {
         <div className="inst-sidebar-footer">
           <div className="inst-sidebar-user">
             <div className="inst-avatar">{initials}</div>
-            <div className="inst-user-info">
+            <div className="inst-user-info" onClick={() => setShowProfile(true)} style={{ cursor: 'pointer' }} title="Edit profile">
               <span className="inst-user-name">{user?.name || 'Instructor'}</span>
               <span className="inst-user-role">{user?.role || 'instructor'}</span>
             </div>
@@ -100,10 +101,11 @@ export default function InstructorLayout() {
         </div>
       </aside>
 
-      {/* ── Main ── */}
       <main className="inst-main">
         <Outlet />
       </main>
+
+      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
     </div>
   );
 }

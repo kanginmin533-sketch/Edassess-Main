@@ -1,12 +1,13 @@
-# 📁 backend/modules/views.py
+# backend/modules/views.py
 from django.db.models import Q
-from rest_framework import generics, permissions, parsers
-from accounts.models import User
-from .models import Module
-from .serializers import ModuleSerializer
-from accounts.permissions import IsInstructor, CanViewReviewModules
-from .models import Announcement
-from .serializers import AnnouncementSerializer
+from rest_framework import generics, permissions, parsers, serializers
+from accounts.activity import log_activity
+from accounts.models import User, department_of_major
+from accounts.permissions import (
+    IsInstructor, CanViewReviewModules, apply_dept_scope, apply_major_scope, is_super_admin,
+)
+from .models import Module, Announcement
+from .serializers import ModuleSerializer, AnnouncementSerializer
 
 
 class IsAdminOrReadOnly(permissions.BasePermission):
@@ -27,34 +28,89 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 
 class ModuleListCreateView(generics.ListCreateAPIView):
     """GenEd/ProfEd modules (department=None) = shared sa lahat.
-    Major modules (department set) = makikita lang ng kaparehas na department."""
+    Major modules (department set) = makikita lang ng kaparehas na department.
+    Super admin lang ang nakakakita ng lahat."""
     serializer_class = ModuleSerializer
     permission_classes = [IsAdminOrReadOnly]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Module.objects.all()
-        if user.role == User.ROLE_ADMIN:
-            return qs
-        return qs.filter(Q(department__isnull=True) | Q(department=user.department))
+        qs = apply_dept_scope(Module.objects.all(), self.request.user)
+        # Student: Major modules na may major tag ay para lang sa kapareho niyang major
+        return apply_major_scope(qs, self.request.user)
 
     def get_serializer_context(self):
         return {'request': self.request}
 
     def perform_create(self, serializer):
+        user = self.request.user
         category = serializer.validated_data.get('category')
-        department = self.request.user.department if category == 'Major' else None
-        serializer.save(uploaded_by=self.request.user, department=department)
+        major = serializer.validated_data.get('major') or None
+
+        department = None
+        if category == 'Major':
+            if major:
+                # Hinuhulaan ang department mula sa major; dapat nasa department ng uploader
+                department = department_of_major(major)
+                if user.department and department != user.department:
+                    raise serializers.ValidationError(
+                        {'major': f'{major} is not a {user.department} major.'}
+                    )
+            elif is_super_admin(user):
+                # Super admin na walang major: puwedeng pumili ng department (blank = shared)
+                chosen = str(self.request.data.get('department') or '').strip().upper()
+                department = chosen if chosen in dict(User.DEPARTMENT_CHOICES) else None
+            else:
+                department = user.department
+        else:
+            major = None
+
+        module = serializer.save(uploaded_by=user, department=department, major=major)
+        log_activity(
+            self.request, 'module.upload',
+            f'Uploaded review module "{module.title}" ({module.category}'
+            f'{", " + module.major if module.major else (", " + module.department if module.department else "")})',
+            category='modules', department=module.department or user.department,
+        )
 
 
 class ModuleDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Module.objects.all()
     serializer_class = ModuleSerializer
     permission_classes = [IsAdminOrReadOnly]
 
+    def get_queryset(self):
+        user = self.request.user
+        qs = Module.objects.all()
+
+        if is_super_admin(user):
+            return qs
+        if self.request.method in permissions.SAFE_METHODS:
+            return apply_major_scope(apply_dept_scope(qs, user), user)
+
+        # Edit/delete:
+        #  - Department admin: modules ng department niya (o in-upload ng taga-department niya)
+        #  - Instructor: sariling uploads lang
+        if user.role == User.ROLE_ADMIN:
+            return qs.filter(Q(department=user.department) | Q(uploaded_by__department=user.department))
+        return qs.filter(uploaded_by=user)
+
     def get_serializer_context(self):
         return {'request': self.request}
+
+    def perform_update(self, serializer):
+        module = serializer.save()
+        log_activity(
+            self.request, 'module.update', f'Updated review module "{module.title}"',
+            category='modules', department=module.department,
+        )
+
+    def perform_destroy(self, instance):
+        title, dept = instance.title, instance.department
+        instance.delete()
+        log_activity(
+            self.request, 'module.delete', f'Deleted review module "{title}"',
+            category='modules', department=dept,
+        )
 
 
 class AnnouncementListCreateView(generics.ListCreateAPIView):

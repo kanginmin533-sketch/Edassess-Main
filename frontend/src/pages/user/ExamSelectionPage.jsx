@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Clock, FileText, Zap, ChevronRight } from 'lucide-react';
+import { BookOpen, Clock, FileText, Zap, ChevronRight, BarChart2, GraduationCap } from 'lucide-react';
 import { examApi } from '../../api/examApi';
+import authApi from '../../api/authApi';
 import useAuthStore from '../../auth/useAuthStore';
+import useExamHistory from '../../hooks/useExamHistory';
+import { GWA_WEIGHTS, PASSING_GWA, computeGwa, points, fmt } from '../../utils/gwa';
+import { majorsFor } from '../../utils/majors';
+import apiError from '../../utils/apiError';
 
 const EXAM_TYPES = [
   {
@@ -36,50 +41,81 @@ const EXAM_TYPES = [
     label:    'Specialization (Major)',
     short:    'Major',
     weight:   '40%',
-    items:    150,
+    items:    180,
     hours:    3,
     minutes:  180,
     color:    'purple',
-    desc:     'Covers your major field: Math, English, Science, Filipino, MAPEH, Values Ed, and more.',
-    topics:   ['Mathematics', 'English', 'Science', 'Filipino', 'MAPEH', 'Values Education', 'TLE'],
+    desc:     'Covers your major field.', // napapalitan ng major ng student sa baba
+    topics:   [],                          // napapalitan ng major ng student sa baba
     icon:     Zap,
   },
 ];
 
+const CATEGORY_MAP = { gened: 'GenEd', profed: 'ProfEd', major: 'Major' };
+
 export default function ExamSelectionPage() {
   const navigate = useNavigate();
-  const { user } = useAuthStore(); // ← bago
+  const { user, updateUser } = useAuthStore();
+  const { history } = useExamHistory();
   const [activeExams, setActiveExams] = useState([]);
+  const [examConfig, setExamConfig] = useState(null);
   const [fetching, setFetching] = useState(true);
+  const [savingMajor, setSavingMajor] = useState(false);
+
+  const gwa = computeGwa(history || []);
+  const myMajors = majorsFor(user?.department);
 
   useEffect(() => {
-    async function loadActiveExams() {
+    async function loadData() {
       try {
-        const data = await examApi.getPublicExams();
-        setActiveExams(data);
+        const [exams, config] = await Promise.all([
+          examApi.getPublicExams(),
+          examApi.getExamConfig().catch(() => null), // kahit mag-fail ang config, tuloy pa rin
+        ]);
+        setActiveExams(exams);
+        setExamConfig(config);
       } catch (err) {
         console.error('Failed to load active exams:', err);
       } finally {
         setFetching(false);
       }
     }
-    loadActiveExams();
+    loadData();
   }, []);
 
-  const CATEGORY_MAP = { gened: 'GenEd', profed: 'ProfEd', major: 'Major' };
+  // Pagpili/pagpapalit ng major ng student
+  const handlePickMajor = async (major) => {
+    if (major === user?.major || savingMajor) return;
+    setSavingMajor(true);
+    try {
+      const res = await authApi.updateProfile({ major });
+      updateUser({ major: res?.major ?? major });
+    } catch (err) {
+      alert(apiError(err, 'Failed to save your major.'));
+    } finally {
+      setSavingMajor(false);
+    }
+  };
 
-  // Major exams dapat tumugma sa department ng student; GenEd/ProfEd shared sa lahat.
+  // GenEd/ProfEd: shared sa lahat. Major: ang exam na naka-tag sa major ng student.
+  // (Lumang Major exam na walang major tag ay gagamitin lang kung pasok sa department niya.)
   const findMatchingExam = (category) => {
-    return activeExams.find((e) => {
-      if (e.category !== category) return false;
-      if (category === 'Major') return e.department === user?.department;
-      return true;
-    });
+    const matches = activeExams.filter((e) => e.category === category);
+    if (category !== 'Major') return matches[0];
+    return (
+      matches.find((e) => e.major && e.major === user?.major) ||
+      matches.find((e) => !e.major && (!e.department || e.department === 'BOTH' || e.department === user?.department))
+    );
   };
 
   const handleStart = (exam) => {
     const category = CATEGORY_MAP[exam.id];
     const matchingExam = findMatchingExam(category);
+
+    if (category === 'Major' && !user?.major) {
+      alert('Please select your major first.');
+      return;
+    }
 
     if (!matchingExam) {
       alert(`No active ${exam.label} exam has been published yet. Please check with your instructor.`);
@@ -88,13 +124,14 @@ export default function ExamSelectionPage() {
 
     navigate('/dashboard/exam', {
       state: {
-        examId:      matchingExam.id,
-        examType:    exam.id,
-        label:       matchingExam.title,
-        short:       exam.short,
-        totalItems:  matchingExam.questions.length,
-        durationMin: matchingExam.duration_minutes,
-        color:       exam.color,
+        examId:           matchingExam.id,
+        examType:         exam.id,
+        label:            matchingExam.title,
+        short:            exam.short,
+        totalItems:       matchingExam.questions.length,
+        durationMin:      matchingExam.duration_minutes,
+        color:            exam.color,
+        shuffleQuestions: examConfig?.shuffleQuestions ?? true,
       },
     });
   };
@@ -137,12 +174,91 @@ export default function ExamSelectionPage() {
           </div>
         </div>
 
+        {/* ── Your Major ── */}
+        {myMajors.length > 0 && (
+          <div className="user-card" style={{ marginBottom: 24 }}>
+            <div className="user-card-body">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <GraduationCap size={16} style={{ color: 'var(--user-accent)' }} />
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--user-text-muted)' }}>
+                  Your Major · {user?.department}
+                </div>
+              </div>
+              <div style={{ fontSize: 12.5, color: user?.major ? 'var(--user-text-sub)' : 'var(--user-danger, #dc2626)', marginBottom: 12 }}>
+                {user?.major
+                  ? 'Your Specialization exam is based on this major. You can change it anytime.'
+                  : 'Select your major to unlock the Specialization exam.'}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {myMajors.map((m) => {
+                  const active = user?.major === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => handlePickMajor(m)}
+                      disabled={savingMajor}
+                      style={{
+                        padding: '9px 14px',
+                        borderRadius: 8,
+                        cursor: savingMajor ? 'wait' : 'pointer',
+                        fontSize: 13,
+                        fontWeight: active ? 700 : 500,
+                        border: `1px solid ${active ? 'var(--user-accent)' : 'var(--user-border, #e5e7eb)'}`,
+                        background: active ? 'var(--user-accent-soft)' : 'transparent',
+                        color: active ? 'var(--user-accent)' : 'var(--user-text, inherit)',
+                      }}
+                    >
+                      {m}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Overall GWA ── */}
+        <div className="user-card" style={{ marginBottom: 24 }}>
+          <div className="user-card-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--user-text-muted)' }}>Overall GWA</div>
+              <div style={{ fontSize: 12.5, color: 'var(--user-text-sub)', marginTop: 2 }}>
+                GenEd 20% + ProfEd 40% + Major 40% · passing {PASSING_GWA}%
+              </div>
+            </div>
+            {gwa.complete ? (
+              <div style={{ fontSize: 28, fontWeight: 800, color: gwa.passed ? 'var(--user-accent)' : 'var(--user-danger)' }}>
+                {fmt(gwa.gwa)}%
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: 'var(--user-text-muted)' }}>
+                Pending — still missing: <strong>{gwa.missing.join(', ')}</strong>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* ── Exam Cards ── */}
         <div className="exam-cards-grid">
-          {EXAM_TYPES.map((exam) => {
+          {EXAM_TYPES.map((baseExam) => {
+            // Ang Major card ay naka-personalize sa major ng student
+            const exam = baseExam.id === 'major'
+              ? {
+                  ...baseExam,
+                  label: user?.major ? `Specialization — ${user.major}` : baseExam.label,
+                  desc: user?.major
+                    ? `Covers your major field: ${user.major}.`
+                    : 'Select your major above to see your Specialization exam.',
+                  topics: user?.major ? [user.major] : [],
+                }
+              : baseExam;
+
             const Icon = exam.icon;
             const category = CATEGORY_MAP[exam.id];
-            const matchingExam = findMatchingExam(category); // ← palitan mula sa dating inline .find()
+            const needsMajor = category === 'Major' && !user?.major;
+            const matchingExam = needsMajor ? null : findMatchingExam(category);
+            const latest = (history || []).find((h) => h.short === exam.short);
             return (
               <div className="exam-sel-card" key={exam.id}>
                 <div className="exam-sel-card-top">
@@ -170,19 +286,32 @@ export default function ExamSelectionPage() {
                     <Zap size={14} />
                     <span>LET Weight: <strong>{exam.weight}</strong></span>
                   </div>
+                  <div className="exam-sel-meta-row">
+                    <BarChart2 size={14} />
+                    <span>
+                      Latest score:{' '}
+                      <strong>
+                        {latest
+                          ? `${latest.percentage}% (× ${GWA_WEIGHTS[exam.short]} = ${fmt(points(latest.percentage, exam.short))} pts)`
+                          : 'Not taken yet'}
+                      </strong>
+                    </span>
+                  </div>
                 </div>
 
                 {/* Topics */}
-                <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--user-text-muted)', marginBottom: 8 }}>
-                    Coverage Areas
+                {exam.topics.length > 0 && (
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--user-text-muted)', marginBottom: 8 }}>
+                      Coverage Areas
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {exam.topics.map((t) => (
+                        <span key={t} className="u-badge u-badge-neutral" style={{ fontSize: 11 }}>{t}</span>
+                      ))}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {exam.topics.map((t) => (
-                      <span key={t} className="u-badge u-badge-neutral" style={{ fontSize: 11 }}>{t}</span>
-                    ))}
-                  </div>
-                </div>
+                )}
 
                 <button
                   className={`exam-sel-btn ${exam.color}`}
@@ -190,7 +319,14 @@ export default function ExamSelectionPage() {
                   disabled={!matchingExam}
                   style={!matchingExam ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                 >
-                  {matchingExam ? `Start ${exam.short} Exam` : 'Not Available Yet'} <ChevronRight size={15} style={{ display: 'inline' }} />
+                  {fetching
+                    ? 'Loading...'
+                    : needsMajor
+                      ? 'Select Your Major First'
+                      : matchingExam
+                        ? `Start ${exam.short} Exam`
+                        : 'Not Available Yet'}{' '}
+                  <ChevronRight size={15} style={{ display: 'inline' }} />
                 </button>
               </div>
             );

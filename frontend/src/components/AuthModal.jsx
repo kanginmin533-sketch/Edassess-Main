@@ -5,6 +5,7 @@ import { Mail, KeyRound, ArrowRight, X, User, Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../auth/useAuthStore';
 import authApi from '../api/authApi';
+import { majorsFor } from '../utils/majors';
 import '../styles/AuthModal.css';
 
 // ── Role → route map ───────────────────────────────────────────────────────
@@ -15,7 +16,7 @@ const ROLE_REDIRECT = {
 };
 
 const DEPARTMENTS = [
-  { value: 'CIT', label: 'CIT', full: 'College of Information Technology' },
+  { value: 'CIT', label: 'CIT', full: 'College of Industrial Technology' },
   { value: 'CTE', label: 'CTE', full: 'College of Teacher Education' },
 ];
 
@@ -76,8 +77,20 @@ const PasswordField = ({ placeholder, value, onChange, show, onToggle }) => (
   </div>
 );
 
-// Department selector for registration — CIT vs CTE. Button-style, same
-// pattern as the admin UserPage instructor department picker.
+// Shared button style para sa department at major pickers
+const pickerBtnStyle = (active) => ({
+  boxSizing: 'border-box',
+  padding: '10px 12px',
+  borderRadius: 8,
+  border: `1px solid ${active ? 'var(--prmsu-gold)' : 'var(--border-subtle)'}`,
+  background: active ? 'var(--prmsu-gold-pale)' : '#ffffff',
+  color: 'var(--text-dark)',
+  fontSize: 13,
+  fontWeight: active ? 700 : 500,
+  cursor: 'pointer',
+});
+
+// Department selector for registration — CIT vs CTE.
 const DepartmentField = ({ value, onChange }) => (
   <div style={{ marginBottom: 14, width: '100%' }}>
     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-light)' }}>
@@ -90,19 +103,7 @@ const DepartmentField = ({ value, onChange }) => (
           type="button"
           onClick={() => onChange(d.value)}
           title={d.full}
-          style={{
-            flex: '1 1 0',
-            minWidth: 0,
-            boxSizing: 'border-box',
-            padding: '10px 12px',
-            borderRadius: 8,
-            border: `1px solid ${value === d.value ? 'var(--prmsu-gold)' : 'var(--border-subtle)'}`,
-            background: value === d.value ? 'var(--prmsu-gold-pale)' : '#ffffff',
-            color: 'var(--text-dark)',
-            fontSize: 13.5,
-            fontWeight: value === d.value ? 700 : 500,
-            cursor: 'pointer',
-          }}
+          style={{ ...pickerBtnStyle(value === d.value), flex: '1 1 0', minWidth: 0, fontSize: 13.5 }}
         >
           {d.label}
         </button>
@@ -113,6 +114,35 @@ const DepartmentField = ({ value, onChange }) => (
     </p>
   </div>
 );
+
+// Major selector — lumalabas pagkatapos pumili ng department.
+const MajorField = ({ department, value, onChange }) => {
+  const majors = majorsFor(department);
+  if (!department) return null;
+
+  return (
+    <div style={{ marginBottom: 14, width: '100%' }}>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-light)' }}>
+        What is your major?
+      </label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%' }}>
+        {majors.map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => onChange(m)}
+            style={{ ...pickerBtnStyle(value === m), flex: '1 1 calc(50% - 8px)', minWidth: 0 }}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+      <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--text-light)' }}>
+        {value ? `Major: ${value}` : 'Select your major.'}
+      </p>
+    </div>
+  );
+};
 
 const SubmitButton = ({ text, disabled }) => (
   <button
@@ -135,6 +165,7 @@ const AuthModal = () => {
     password:        '',
     confirmPassword: '',
     department:      '', // 'CIT' | 'CTE' — register only
+    major:           '', // isa sa mga major ng department — register only
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -147,7 +178,7 @@ const AuthModal = () => {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   const resetForm = () => {
-    setFormData({ fullName: '', email: '', password: '', confirmPassword: '', department: '' });
+    setFormData({ fullName: '', email: '', password: '', confirmPassword: '', department: '', major: '' });
     setError('');
     setShowPw(false);
     setShowConfirmPw(false);
@@ -198,10 +229,15 @@ const AuthModal = () => {
   // ── Register ──────────────────────────────────────────────────────────────
   const handleRegister = async (e) => {
     e.preventDefault();
-    const { fullName, email, password, confirmPassword, department } = formData;
+    const { fullName, email, password, confirmPassword, department, major } = formData;
 
     if (!fullName || !email || !password || !confirmPassword || !department) {
       setError('Please complete all fields, including your college.');
+      return;
+    }
+
+    if (!major) {
+      setError('Please select your major.');
       return;
     }
 
@@ -219,7 +255,14 @@ const AuthModal = () => {
       setIsLoading(true);
       setError('');
 
-      await authApi.register({ fullName, email, password, confirmPassword, department });
+      await authApi.register({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        password,
+        confirmPassword,
+        department,
+        major,
+      });
 
       resetForm();
       setNotice('Account created! You can now log in.');
@@ -246,6 +289,7 @@ const AuthModal = () => {
       >
         <motion.div
           className="auth-enhanced-container"
+          style={{ maxHeight: '92vh', overflowY: 'auto' }}
           initial={{ opacity: 0, scale: 0.98, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.98, y: 10 }}
@@ -319,13 +363,25 @@ const AuthModal = () => {
                   <InputField
                     icon={Mail}
                     type="email"
-                    placeholder="University Email"
+                    placeholder="Email"
                     value={formData.email}
                     onChange={(e) => handleInputChange(e, 'email')}
                   />
                   <DepartmentField
                     value={formData.department}
-                    onChange={(val) => setFormData((p) => ({ ...p, department: val }))}
+                    onChange={(val) => {
+                      // Magpalit ng department = ibang listahan ng major, kaya i-reset
+                      setFormData((p) => ({ ...p, department: val, major: val === p.department ? p.major : '' }));
+                      if (error) setError('');
+                    }}
+                  />
+                  <MajorField
+                    department={formData.department}
+                    value={formData.major}
+                    onChange={(val) => {
+                      setFormData((p) => ({ ...p, major: val }));
+                      if (error) setError('');
+                    }}
                   />
                   <PasswordField
                     placeholder="Password"

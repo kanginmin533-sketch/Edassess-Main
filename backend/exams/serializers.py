@@ -1,8 +1,29 @@
+# backend/exams/serializers.py
 from rest_framework import serializers
-from .models import Choice, Exam, ExamAttempt, ExamConfig, Question
+from accounts.models import MAJOR_CHOICES, department_of_major
+from .models import (
+    Choice, Exam, ExamAttempt, ExamConfig, Question,
+    MAJOR_TARGET_CHOICES, MAX_QUESTIONS_PER_EXAM,
+)
+
+
+def _check_major_for_user(major, user):
+    """Ang major ay dapat nasa department ng gumagawa (super admin = kahit alin)."""
+    if not major:
+        raise serializers.ValidationError({'major': 'Select a major for Major questions and exams.'})
+    dept = department_of_major(major)
+    if user is not None and getattr(user, 'department', None) and dept != user.department:
+        raise serializers.ValidationError(
+            {'major': f'{major} is not a {user.department} major.'}
+        )
+    return dept
 
 
 class QuestionSerializer(serializers.Serializer):
+    """
+    Custom serializer: ang shape ng frontend (choices[] + answer index) ay hindi direktang
+    tumutugma sa Question/Choice tables, kaya dito nangyayari ang translation.
+    """
     id = serializers.IntegerField(read_only=True)
     question = serializers.CharField()
     category = serializers.ChoiceField(choices=['GenEd', 'ProfEd', 'Major'])
@@ -11,12 +32,32 @@ class QuestionSerializer(serializers.Serializer):
     choices = serializers.ListField(child=serializers.CharField(allow_blank=True), min_length=4, max_length=4)
     answer = serializers.IntegerField(min_value=0, max_value=3)
     explanation = serializers.CharField(required=False, allow_blank=True)
-    department = serializers.CharField(read_only=True, allow_null=True)
-    # Per-choice explanation — parallel array sa `choices`, index-aligned.
-    # Optional: kung hindi ipinasa, tuluyang mag-e-empty strings.
+    # Major lang: isa sa mga major ng department (hal. 'Mathematics', 'Automotive Technology').
+    major = serializers.ChoiceField(
+        choices=MAJOR_CHOICES, required=False, allow_null=True, allow_blank=True
+    )
+    # Luma: hindi na ginagamit ng frontend. Hinuhulaan na ito mula sa `major`.
+    department = serializers.ChoiceField(
+        choices=MAJOR_TARGET_CHOICES, required=False, allow_null=True, allow_blank=True
+    )
+    # Per-choice explanation, index-aligned sa `choices`.
     choice_explanations = serializers.ListField(
         child=serializers.CharField(allow_blank=True), required=False, min_length=4, max_length=4
     )
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        category = attrs.get('category') or (self.instance.category if self.instance else None)
+
+        if category == 'Major':
+            major = attrs.get('major') or (self.instance.major if self.instance else None)
+            attrs['major'] = major
+            attrs['department'] = _check_major_for_user(major, user)
+        else:
+            attrs['major'] = None
+            attrs['department'] = None
+        return attrs
 
     def to_representation(self, instance):
         choice_objs = list(instance.choices.all())
@@ -30,21 +71,25 @@ class QuestionSerializer(serializers.Serializer):
             'answer': next((i for i, c in enumerate(choice_objs) if c.is_correct), 0),
             'explanation': instance.explanation,
             'department': instance.department,
+            'major': instance.major,
             'choice_explanations': [c.explanation for c in choice_objs],
         }
 
     def create(self, validated_data):
+        user = self.context['request'].user
         choices = validated_data.pop('choices')
         answer = validated_data.pop('answer')
         choice_explanations = validated_data.pop('choice_explanations', ['', '', '', ''])
+
         question = Question.objects.create(
             text=validated_data['question'],
             category=validated_data['category'],
             subject=validated_data.get('subject', ''),
             difficulty=validated_data.get('difficulty', 'Medium'),
             explanation=validated_data.get('explanation', ''),
-            created_by=self.context['request'].user,
-            department=self.context['request'].user.department if validated_data['category'] == 'Major' else None,
+            created_by=user,
+            major=validated_data.get('major'),
+            department=validated_data.get('department'),
         )
         for i, choice_text in enumerate(choices):
             Choice.objects.create(
@@ -61,10 +106,10 @@ class QuestionSerializer(serializers.Serializer):
         instance.subject = validated_data.get('subject', instance.subject)
         instance.difficulty = validated_data.get('difficulty', instance.difficulty)
         instance.explanation = validated_data.get('explanation', instance.explanation)
-        if 'category' in validated_data:
-            instance.department = (
-                self.context['request'].user.department if instance.category == 'Major' else None
-            )
+
+        # validate() ang nag-aayos ng major/department ayon sa category
+        instance.major = validated_data.get('major')
+        instance.department = validated_data.get('department')
         instance.save()
 
         if 'choices' in validated_data:
@@ -87,15 +132,42 @@ class ExamSerializer(serializers.ModelSerializer):
         source='questions', many=True, queryset=Question.objects.all(),
         write_only=True, required=False,
     )
+    major = serializers.ChoiceField(
+        choices=MAJOR_CHOICES, required=False, allow_null=True, allow_blank=True
+    )
+    # Hinuhulaan mula sa major; read lang para sa frontend.
+    department = serializers.ChoiceField(
+        choices=MAJOR_TARGET_CHOICES, required=False, allow_null=True, allow_blank=True
+    )
 
     class Meta:
         model = Exam
         fields = [
             'id', 'title', 'description', 'category', 'status',
             'duration_minutes', 'passing_score', 'is_active',
-            'questions', 'question_ids', 'department', 'created_at',
+            'questions', 'question_ids', 'major', 'department', 'created_at',
         ]
-        read_only_fields = ['department']
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        category = attrs.get('category') or (self.instance.category if self.instance else 'GenEd')
+
+        if category == 'Major':
+            major = attrs.get('major') or (self.instance.major if self.instance else None)
+            attrs['major'] = major
+            attrs['department'] = _check_major_for_user(major, user)
+        else:
+            attrs['major'] = None
+            attrs['department'] = None
+
+        selected = attrs.get('questions')
+        if selected is not None and len(selected) > MAX_QUESTIONS_PER_EXAM:
+            raise serializers.ValidationError({
+                'question_ids': f'An exam can have at most {MAX_QUESTIONS_PER_EXAM} questions '
+                                f'(you selected {len(selected)}).'
+            })
+        return attrs
 
 
 class ExamAttemptSerializer(serializers.ModelSerializer):

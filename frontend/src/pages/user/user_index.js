@@ -1,5 +1,4 @@
 export { default as UserLayout }           from './UserLayout';
-export { default as CitUserLayout }        from './CitUserLayout';
 export { default as UserDashboard }        from './UserDashboard';
 export { default as ExamSelectionPage }    from './ExamSelectionPage';
 export { default as ExamPage }             from './ExamPage';

@@ -1,6 +1,16 @@
+# backend/exams/models.py
 from django.conf import settings
 from django.db import models
-from accounts.models import User 
+from accounts.models import User, MAJOR_CHOICES
+
+# Para sa Major lang: 'CIT' | 'CTE' | 'BOTH'.
+# Luma na ito (dati, per-department lang). Ang bagong Major exams/questions ay naka-tag
+# sa isang `major`, at ang `department` ay hinuhulaan mula roon. Iniwan ang 'BOTH'
+# para hindi masira ang mga lumang record.
+MAJOR_TARGET_CHOICES = tuple(User.DEPARTMENT_CHOICES) + (('BOTH', 'Both CIT and CTE'),)
+
+# Max na bilang ng questions sa iisang exam
+MAX_QUESTIONS_PER_EXAM = 180
 
 
 class Question(models.Model):
@@ -26,9 +36,12 @@ class Question(models.Model):
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='Medium')
     explanation = models.TextField(blank=True)
     points = models.IntegerField(default=1)
+    # Aplikable lang sa Major. Blank/null sa GenEd at ProfEd.
     department = models.CharField(
-        max_length=10, choices=User.DEPARTMENT_CHOICES, blank=True, null=True
+        max_length=10, choices=MAJOR_TARGET_CHOICES, blank=True, null=True
     )
+    # Aplikable lang sa Major: Mathematics, English, Automotive Technology, atbp.
+    major = models.CharField(max_length=40, choices=MAJOR_CHOICES, blank=True, null=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -43,12 +56,14 @@ class Question(models.Model):
 
 class Choice(models.Model):
     question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name='choices')
-    text = models.TextField()  # ← CharField(max_length=255) papunta rito
+    text = models.TextField()
     is_correct = models.BooleanField(default=False)
+    # Bakit tama/mali ang choice na ito. Hiwalay sa Question.explanation. Optional.
     explanation = models.TextField(blank=True)
 
     def __str__(self):
-        return self.text[:50]  
+        return self.text[:50]
+
 
 class Exam(models.Model):
     CATEGORY_CHOICES = (
@@ -70,9 +85,12 @@ class Exam(models.Model):
     passing_score = models.IntegerField(default=75)
     is_active = models.BooleanField(default=True)
     questions = models.ManyToManyField(Question, related_name='exams', blank=True)
+    # Aplikable lang sa Major exams.
     department = models.CharField(
-        max_length=10, choices=User.DEPARTMENT_CHOICES, blank=True, null=True
+        max_length=10, choices=MAJOR_TARGET_CHOICES, blank=True, null=True
     )
+    # Aplikable lang sa Major exams: makikita lang ng mga student na kapareho ang major.
+    major = models.CharField(max_length=40, choices=MAJOR_CHOICES, blank=True, null=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -111,8 +129,7 @@ class ExamAttempt(models.Model):
 
     subject_breakdown = models.JSONField(default=dict)
 
-    # Full snapshot of {questions, answers} so ResultsPage can be reloaded
-    # or revisited later without losing the answer-key/explanation detail.
+    # Full snapshot ng {questions, answers} para ma-reload ang ResultsPage.
     detail = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -125,6 +142,7 @@ class ExamAttempt(models.Model):
 
 
 def default_exam_config():
+    # Iniwan para sa mga lumang migration na maaaring tumutukoy dito.
     return {}
 
 

@@ -15,11 +15,16 @@ class ModuleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Module
         fields = [
-            'id', 'title', 'description', 'category', 'department', 'file',
+            'id', 'title', 'description', 'category', 'department', 'major', 'file',
             'fileName', 'fileSize', 'fileType', 'fileUrl',
             'uploadedBy', 'uploadedAt',
         ]
-        extra_kwargs = {'file': {'write_only': True}, 'department': {'read_only': True}}
+        # department: hinuhulaan ng view. major: optional, puwedeng ipasa kapag Major ang category.
+        extra_kwargs = {
+            'file': {'write_only': True},
+            'department': {'read_only': True},
+            'major': {'required': False, 'allow_null': True, 'allow_blank': True},
+        }
 
     def get_fileName(self, obj):
         return obj.file_name

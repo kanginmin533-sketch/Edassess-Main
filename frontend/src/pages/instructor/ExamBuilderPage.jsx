@@ -1,8 +1,10 @@
-//src/pages/instructor/ExamBuilderPage.jsx
+// src/pages/instructor/ExamBuilderPage.jsx
 import { useState, useEffect } from 'react';
-import { ClipboardList, Plus, Trash2, X, Clock, BookOpen, CheckSquare, Square } from 'lucide-react';
+import { ClipboardList, Plus, Trash2, X, Clock, BookOpen, Save } from 'lucide-react';
 import { examApi } from '../../api/examApi';
 import useAuthStore from '../../auth/useAuthStore';
+import MajorPicker from '../../components/MajorPicker';
+import apiError from '../../utils/apiError';
 
 // LET-based default durations
 const CATEGORY_DEFAULTS = {
@@ -10,6 +12,9 @@ const CATEGORY_DEFAULTS = {
   ProfEd: 180,
   Major:  180,
 };
+
+const CATEGORIES = ['GenEd', 'ProfEd', 'Major'];
+const MAX_QUESTIONS_PER_EXAM = 180;
 
 const STATUS_BADGE = {
   active:    'inst-badge inst-badge-success',
@@ -23,26 +28,52 @@ const CATEGORY_BADGE = {
   Major:  'inst-badge inst-badge-amber',
 };
 
-const MAX_QUESTIONS_PER_EXAM = 180;
-
 const DIFFICULTY_BADGE = {
   Easy:   'inst-badge inst-badge-success',
   Medium: 'inst-badge inst-badge-amber',
   Hard:   'inst-badge inst-badge-danger',
 };
 
-const EMPTY_FORM = { name: '', category: 'GenEd', duration: 120, selectedQuestions: [], status: 'draft' };
+const EMPTY_FORM = {
+  name: '', category: 'GenEd', duration: 120, selectedQuestions: [], status: 'draft', major: '',
+};
+
+function mapExamFromApi(e) {
+  return {
+    id: e.id,
+    name: e.title,
+    category: e.category,
+    major: e.major,
+    department: e.department,
+    duration: e.duration_minutes,
+    questions: e.questions.map((q) => q.id),
+    status: e.status,
+    created: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+  };
+}
+
+function mapQuestionFromApi(q) {
+  return {
+    id: q.id,
+    question: q.question,
+    category: q.category,
+    difficulty: q.difficulty,
+    major: q.major, // Major lang: 'Mathematics', 'Automotive Technology', ... | null
+  };
+}
+
+const categoryLabel = (category, major) =>
+  category === 'Major' && major ? `Major (${major})` : category;
 
 export default function ExamBuilderPage() {
-  const { user } = useAuthStore(); // ← bago, para malaman ang sariling department
-  const [exams, setExams]         = useState([]);
+  const { user } = useAuthStore();
+  const [exams, setExams]               = useState([]);
   const [questionPool, setQuestionPool] = useState([]);
-  const [fetching, setFetching]   = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editItem, setEditItem]   = useState(null);
-  const [form, setForm]           = useState(EMPTY_FORM);
-  const [saving, setSaving]       = useState(false);
-  const [qFilter, setQFilter]     = useState('All');
+  const [fetching, setFetching]         = useState(true);
+  const [showModal, setShowModal]       = useState(false);
+  const [editItem, setEditItem]         = useState(null);
+  const [form, setForm]                 = useState(EMPTY_FORM);
+  const [saving, setSaving]             = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -62,43 +93,40 @@ export default function ExamBuilderPage() {
     loadData();
   }, []);
 
-  function mapExamFromApi(e) {
-    return {
-      id: e.id,
-      name: e.title,
-      category: e.category,
-      duration: e.duration_minutes,
-      questions: e.questions.map((q) => q.id),
-      status: e.status,
-      created: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-    };
-  }
-  function mapQuestionFromApi(q) {
-    return {
-      id: q.id,
-      question: q.question,
-      category: q.category,
-      difficulty: q.difficulty,
-      department: q.department, // ← bago — null/'CIT'/'CTE', aplikable lang sa Major
-    };
-  }
-
   const openAdd = () => {
     setEditItem(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM });
     setShowModal(true);
   };
 
   const openEdit = (exam) => {
     setEditItem(exam.id);
-    setForm({ name: exam.name, category: exam.category, duration: exam.duration, selectedQuestions: [...exam.questions], status: exam.status });
+    setForm({
+      name: exam.name,
+      category: exam.category,
+      duration: exam.duration,
+      selectedQuestions: [...exam.questions],
+      status: exam.status,
+      major: exam.major || '',
+    });
     setShowModal(true);
   };
 
   const closeModal = () => { setShowModal(false); setForm(EMPTY_FORM); setEditItem(null); };
 
+  // Ang category tabs sa question picker ang nagtatakda ng category ng exam.
   const handleCategoryChange = (cat) => {
-    setForm((p) => ({ ...p, category: cat, duration: CATEGORY_DEFAULTS[cat] }));
+    if (cat === form.category) return;
+    if (form.selectedQuestions.length > 0 &&
+        !confirm(`Switching to ${cat} will clear your ${form.selectedQuestions.length} selected question(s). Continue?`)) return;
+    setForm((p) => ({ ...p, category: cat, duration: CATEGORY_DEFAULTS[cat], selectedQuestions: [] }));
+  };
+
+  const handleMajorChange = (major) => {
+    if (major === form.major) return;
+    if (form.selectedQuestions.length > 0 &&
+        !confirm('Changing the major will clear your selected questions. Continue?')) return;
+    setForm((p) => ({ ...p, major, selectedQuestions: [] }));
   };
 
   const toggleQuestion = (id) => {
@@ -106,7 +134,7 @@ export default function ExamBuilderPage() {
       const isSelected = p.selectedQuestions.includes(id);
       if (!isSelected && p.selectedQuestions.length >= MAX_QUESTIONS_PER_EXAM) {
         alert(`You can only select up to ${MAX_QUESTIONS_PER_EXAM} questions per exam.`);
-        return p; // walang binago — huwag idagdag
+        return p;
       }
       return {
         ...p,
@@ -117,52 +145,41 @@ export default function ExamBuilderPage() {
     });
   };
 
-  // GenEd/ProfEd — shared, makikita ng lahat ng instructor. Major — naka-scope
-  // lang sa sariling department ng instructor (CIT instructor makakakita lang
-  // ng Major questions na ginawa ng ibang CIT instructor, hindi CTE, at vice versa).
+  // Tanging questions ng napiling category. Major: tugma sa napiling major
+  // (kasama ang lumang Major questions na wala pang major tag).
   const filteredPool = questionPool.filter((q) => {
-    if (qFilter !== 'All' && q.category !== qFilter) return false;
-    if (q.category === 'Major') return q.department === user?.department;
-    return true;
+    if (q.category !== form.category) return false;
+    if (q.category !== 'Major') return true;
+    if (!form.major) return false;
+    return !q.major || q.major === form.major;
   });
 
-  // Select All is scoped to whatever's currently visible under qFilter — picking
-  // "Major" then Select All only grabs the Major questions shown, not the whole pool.
-  const allFilteredSelected = filteredPool.length > 0
-    && filteredPool.every((q) => form.selectedQuestions.includes(q.id));
-
-  const handleToggleSelectAll = () => {
+  const selectAllShown = () => {
     setForm((p) => {
-      if (allFilteredSelected) {
-        // Deselect: remove only the currently-filtered ids, keep selections
-        // made under other filters untouched.
-        const filteredIds = new Set(filteredPool.map((q) => q.id));
-        return { ...p, selectedQuestions: p.selectedQuestions.filter((id) => !filteredIds.has(id)) };
+      const merged = [...p.selectedQuestions];
+      let capped = false;
+      for (const q of filteredPool) {
+        if (merged.includes(q.id)) continue;
+        if (merged.length >= MAX_QUESTIONS_PER_EXAM) { capped = true; break; }
+        merged.push(q.id);
       }
-
-      const alreadySelected = new Set(p.selectedQuestions);
-      const toAdd = filteredPool.filter((q) => !alreadySelected.has(q.id)).map((q) => q.id);
-      const combined = [...p.selectedQuestions, ...toAdd];
-
-      if (combined.length > MAX_QUESTIONS_PER_EXAM) {
-        const room = MAX_QUESTIONS_PER_EXAM - p.selectedQuestions.length;
-        alert(
-          room > 0
-            ? `Only ${room} more question(s) can be added — the maximum is ${MAX_QUESTIONS_PER_EXAM}. Selected the first ${room} from this list.`
-            : `You've already reached the maximum of ${MAX_QUESTIONS_PER_EXAM} questions.`
-        );
-        return { ...p, selectedQuestions: [...p.selectedQuestions, ...toAdd.slice(0, Math.max(room, 0))] };
-      }
-
-      return { ...p, selectedQuestions: combined };
+      if (capped) alert(`Only the first ${MAX_QUESTIONS_PER_EXAM} questions were selected (the maximum per exam).`);
+      return { ...p, selectedQuestions: merged };
     });
   };
 
+  const clearSelection = () => setForm((p) => ({ ...p, selectedQuestions: [] }));
+
+  // id → pagkakasunod-sunod ng pagpili (1, 2, 3...)
+  const selectedOrder = new Map(form.selectedQuestions.map((id, i) => [id, i + 1]));
+  const selectedCount = form.selectedQuestions.length;
+
   const handleSave = async () => {
     if (!form.name.trim()) return alert('Exam name is required.');
-    if (form.selectedQuestions.length === 0) return alert('Select at least one question.');
-    if (form.selectedQuestions.length > MAX_QUESTIONS_PER_EXAM) {
-      return alert(`This exam has ${form.selectedQuestions.length} questions — the maximum is ${MAX_QUESTIONS_PER_EXAM}.`);
+    if (form.category === 'Major' && !form.major) return alert('Select a major for this exam.');
+    if (selectedCount === 0) return alert('Select at least one question.');
+    if (selectedCount > MAX_QUESTIONS_PER_EXAM) {
+      return alert(`This exam has ${selectedCount} questions — the maximum is ${MAX_QUESTIONS_PER_EXAM}.`);
     }
 
     setSaving(true);
@@ -173,18 +190,19 @@ export default function ExamBuilderPage() {
         duration_minutes: form.duration,
         status: form.status,
         question_ids: form.selectedQuestions,
+        major: form.category === 'Major' ? form.major : null,
       };
 
       if (editItem) {
         const updated = await examApi.updateExam(editItem, payload);
-        setExams((prev) => prev.map((e) => e.id === editItem ? mapExamFromApi(updated) : e));
+        setExams((prev) => prev.map((e) => (e.id === editItem ? mapExamFromApi(updated) : e)));
       } else {
         const created = await examApi.createExam(payload);
         setExams((prev) => [mapExamFromApi(created), ...prev]);
       }
       closeModal();
     } catch (err) {
-      alert(err.response?.data?.detail || err.message || 'Failed to save exam.');
+      alert(apiError(err, 'Failed to save exam.'));
     } finally {
       setSaving(false);
     }
@@ -196,7 +214,7 @@ export default function ExamBuilderPage() {
       await examApi.deleteExam(id);
       setExams((prev) => prev.filter((e) => e.id !== id));
     } catch (err) {
-      alert(err.response?.data?.detail || err.message || 'Failed to delete exam.');
+      alert(apiError(err, 'Failed to delete exam.'));
     }
   };
 
@@ -250,13 +268,17 @@ export default function ExamBuilderPage() {
                 {exams.map((exam) => (
                   <tr key={exam.id}>
                     <td style={{ fontWeight: 600, fontSize: 13 }}>{exam.name}</td>
-                    <td><span className={CATEGORY_BADGE[exam.category]}>{exam.category}</span></td>
+                    <td>
+                      <span className={CATEGORY_BADGE[exam.category]}>
+                        {categoryLabel(exam.category, exam.major)}
+                      </span>
+                    </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, color: 'var(--inst-text-sub)' }}>
                         <Clock size={13} /> {exam.duration} min
                       </div>
                     </td>
-                    <td>{exam.questions.length} items</td>
+                    <td>{exam.questions.length} / {MAX_QUESTIONS_PER_EXAM} items</td>
                     <td><span className={STATUS_BADGE[exam.status]}>{exam.status}</span></td>
                     <td style={{ fontSize: 12, color: 'var(--inst-text-muted)' }}>{exam.created}</td>
                     <td>
@@ -284,10 +306,30 @@ export default function ExamBuilderPage() {
       {/* ── Create/Edit Modal ── */}
       {showModal && (
         <div className="inst-modal-backdrop" onClick={closeModal}>
-          <div className="inst-modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
-            <div className="inst-modal-header">
-              <h3>{editItem ? 'Edit Exam' : 'Create New Exam'}</h3>
-              <button className="inst-btn-icon" onClick={closeModal}><X size={16} /></button>
+          <div className="inst-modal" style={{ maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
+
+            {/* Sticky header: nandito na ang Create/Update para hindi na mag-scroll pababa */}
+            <div
+              className="inst-modal-header"
+              style={{
+                position: 'sticky', top: 0, zIndex: 5,
+                background: 'var(--inst-surface)', gap: 12,
+              }}
+            >
+              <h3 style={{ flex: 1 }}>{editItem ? 'Edit Exam' : 'Create New Exam'}</h3>
+
+              <span
+                className={`inst-badge ${selectedCount > 0 ? 'inst-badge-blue' : 'inst-badge-neutral'}`}
+                title="Questions selected for this exam"
+              >
+                {selectedCount} / {MAX_QUESTIONS_PER_EXAM} selected
+              </span>
+
+              <button className="inst-btn inst-btn-primary inst-btn-sm" onClick={handleSave} disabled={saving}>
+                <Save size={13} />
+                {saving ? 'Saving...' : editItem ? 'Update Exam' : 'Create Exam'}
+              </button>
+              <button className="inst-btn-icon" onClick={closeModal} title="Cancel"><X size={16} /></button>
             </div>
 
             <div className="inst-modal-body">
@@ -303,30 +345,12 @@ export default function ExamBuilderPage() {
                 />
               </div>
 
-              {/* Category + Duration + Status */}
-              <div className="inst-three-col">
-                <div className="inst-form-group">
-                  <label className="inst-form-label">Category</label>
-                  <select
-                    className="inst-form-select"
-                    value={form.category}
-                    onChange={(e) => handleCategoryChange(e.target.value)}
-                  >
-                    <option value="GenEd">GenEd</option>
-                    <option value="ProfEd">ProfEd</option>
-                    <option value="Major">Major</option>
-                  </select>
-                  {form.category === 'Major' && (
-                    <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--inst-text-muted)' }}>
-                      Scoped to your department: <strong>{user?.department || '—'}</strong>
-                    </p>
-                  )}
-                </div>
-
+              {/* Duration + Status (ang category ay nasa question picker sa ibaba) */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div className="inst-form-group">
                   <label className="inst-form-label">
                     Duration
-                    <span className="inst-form-label-sub">· LET-based</span>
+                    <span className="inst-form-label-sub">· default for {form.category}</span>
                   </label>
                   <div className="inst-form-input-unit">
                     <input
@@ -353,59 +377,93 @@ export default function ExamBuilderPage() {
                 </div>
               </div>
 
-              {/* Question Picker */}
-              <div className="inst-form-group" style={{ marginBottom: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-                  <label className="inst-form-label" style={{ marginBottom: 0 }}>
-                    Select Questions
-                    <span className="inst-form-label-sub">
-                      · {form.selectedQuestions.length} / {MAX_QUESTIONS_PER_EXAM} selected
-                    </span>
-                  </label>
-
-                  <button
-                    type="button"
-                    className="inst-btn inst-btn-sm inst-btn-secondary"
-                    onClick={handleToggleSelectAll}
-                    disabled={filteredPool.length === 0}
-                  >
-                    {allFilteredSelected ? <Square size={13} /> : <CheckSquare size={13} />}
-                    {allFilteredSelected ? `Deselect ${qFilter}` : `Select All ${qFilter} (${filteredPool.length})`}
-                  </button>
-                </div>
-
-                {/* Filter */}
-                <div style={{ display: 'flex', gap: 6, margin: '12px 0' }}>
-                  {['All', 'GenEd', 'ProfEd', 'Major'].map((f) => (
+              {/* Category tabs — ito ang nagtatakda ng category ng exam */}
+              <div className="inst-form-group">
+                <label className="inst-form-label">Category</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {CATEGORIES.map((c) => (
                     <button
-                      key={f}
-                      className={`inst-btn inst-btn-sm ${qFilter === f ? 'inst-btn-primary' : 'inst-btn-secondary'}`}
-                      onClick={() => setQFilter(f)}
+                      key={c}
+                      type="button"
+                      className={`inst-btn inst-btn-sm ${form.category === c ? 'inst-btn-primary' : 'inst-btn-secondary'}`}
+                      onClick={() => handleCategoryChange(c)}
                     >
-                      {f}
+                      {c}
                     </button>
                   ))}
                 </div>
+              </div>
 
-                {/* Question list */}
-                <div style={{ border: '1px solid var(--inst-border)', borderRadius: 'var(--inst-radius)', overflow: 'hidden' }}>
-                  {filteredPool.length === 0 ? (
+              {/* Major: buttons para sa major ng department */}
+              {form.category === 'Major' && (
+                <MajorPicker
+                  department={user?.department}
+                  label="Exam is for"
+                  value={form.major}
+                  onChange={handleMajorChange}
+                />
+              )}
+
+              {/* Question Picker */}
+              <div className="inst-form-group" style={{ marginBottom: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <label className="inst-form-label" style={{ margin: 0 }}>
+                    Select Questions
+                    <span className="inst-form-label-sub">
+                      · {filteredPool.length} available · {selectedCount} checked
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="inst-btn inst-btn-secondary inst-btn-sm"
+                      onClick={selectAllShown}
+                      disabled={filteredPool.length === 0}
+                    >
+                      Select all shown
+                    </button>
+                    <button
+                      type="button"
+                      className="inst-btn inst-btn-secondary inst-btn-sm"
+                      onClick={clearSelection}
+                      disabled={selectedCount === 0}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                {/* Question list: scrollable, may row number at pick number */}
+                <div
+                  style={{
+                    border: '1px solid var(--inst-border)',
+                    borderRadius: 'var(--inst-radius)',
+                    overflow: 'hidden auto',
+                    maxHeight: 360,
+                  }}
+                >
+                  {form.category === 'Major' && !form.major ? (
                     <div style={{ padding: 20, textAlign: 'center', fontSize: 13, color: 'var(--inst-text-sub)' }}>
-                      {qFilter === 'Major'
-                        ? `No Major questions for your department (${user?.department || '—'}) yet. Add some in the Question Bank first.`
-                        : 'No questions available. Add some in the Question Bank first.'}
+                      Pick a major above to see its questions.
+                    </div>
+                  ) : filteredPool.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: 'center', fontSize: 13, color: 'var(--inst-text-sub)' }}>
+                      {form.category === 'Major'
+                        ? `No Major questions for ${form.major} yet. Add some in the Question Bank first.`
+                        : `No ${form.category} questions yet. Add some in the Question Bank first.`}
                     </div>
                   ) : (
-                    filteredPool.map((q) => {
-                      const isSelected = form.selectedQuestions.includes(q.id);
-                      const limitReached = !isSelected && form.selectedQuestions.length >= MAX_QUESTIONS_PER_EXAM;
+                    filteredPool.map((q, idx) => {
+                      const order = selectedOrder.get(q.id);
+                      const isSelected = order !== undefined;
+                      const limitReached = !isSelected && selectedCount >= MAX_QUESTIONS_PER_EXAM;
                       return (
                         <div
                           key={q.id}
                           onClick={() => !limitReached && toggleQuestion(q.id)}
                           style={{
-                            display: 'flex', alignItems: 'center', gap: 12,
-                            padding: '11px 14px',
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '10px 14px',
                             cursor: limitReached ? 'not-allowed' : 'pointer',
                             borderBottom: '1px solid var(--inst-border)',
                             background: isSelected ? 'var(--inst-accent-soft)' : 'transparent',
@@ -413,32 +471,58 @@ export default function ExamBuilderPage() {
                             transition: 'background 0.15s, opacity 0.15s',
                           }}
                         >
+                          {/* Row number sa listahan */}
+                          <span
+                            style={{
+                              width: 30, flexShrink: 0, textAlign: 'right',
+                              fontSize: 11.5, fontWeight: 600, color: 'var(--inst-text-muted)',
+                            }}
+                            title="Position in this list"
+                          >
+                            {idx + 1}.
+                          </span>
                           <input
                             type="checkbox"
                             checked={isSelected}
                             disabled={limitReached}
                             onChange={() => toggleQuestion(q.id)}
+                            onClick={(e) => e.stopPropagation()}
                             style={{ flexShrink: 0, accentColor: 'var(--inst-accent)' }}
                           />
                           <span style={{ flex: 1, fontSize: 13, color: 'var(--inst-text)' }}>{q.question}</span>
+
+                          {/* Pick number: nagbibilang ng naka-check */}
+                          {isSelected && (
+                            <span
+                              title={`Item ${order} of ${selectedCount} in this exam`}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                minWidth: 26, height: 20, padding: '0 7px', borderRadius: 10,
+                                background: 'var(--inst-accent)', color: '#fff',
+                                fontSize: 11, fontWeight: 700, flexShrink: 0,
+                              }}
+                            >
+                              {order}
+                            </span>
+                          )}
+
                           <span className={DIFFICULTY_BADGE[q.difficulty]}>{q.difficulty}</span>
                           <span className={CATEGORY_BADGE[q.category]}>
-                            {q.category === 'Major' && q.department ? `Major (${q.department})` : q.category}
+                            {q.category === 'Major' ? (q.major || 'Untagged') : q.category}
                           </span>
                         </div>
                       );
                     })
                   )}
                 </div>
+
+                {selectedCount >= MAX_QUESTIONS_PER_EXAM && (
+                  <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--inst-warning)' }}>
+                    Maximum of {MAX_QUESTIONS_PER_EXAM} questions reached. Uncheck one to pick another.
+                  </p>
+                )}
               </div>
 
-            </div>
-
-            <div className="inst-modal-footer">
-              <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={closeModal}>Cancel</button>
-              <button className="inst-btn inst-btn-primary inst-btn-sm" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : editItem ? 'Update Exam' : 'Create Exam'}
-              </button>
             </div>
           </div>
         </div>

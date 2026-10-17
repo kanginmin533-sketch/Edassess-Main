@@ -1,11 +1,15 @@
+# backend/reports/views.py
 from django.contrib.auth import get_user_model
-from django.db.models import Avg, Count, Q, Max
+from django.db.models import Avg, Count, Q
 from django.utils import timezone
-from rest_framework import permissions, status
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from accounts.permissions import IsInstructor, CanViewReports, CanViewDashboard
+from accounts.permissions import (
+    IsAdmin, IsInstructor, CanViewReports, CanViewDashboard,
+    admin_department, manageable_users,
+)
 from exams.models import Exam, ExamAttempt
 
 User = get_user_model()
@@ -22,24 +26,34 @@ def relative_time(ts, now):
     return f'{int(seconds // 86400)} day(s) ago'
 
 
+def scoped(request):
+    """(users, attempts, exams) na naka-scope sa department ng admin. Super admin = lahat."""
+    dept = admin_department(request.user)
+    users = manageable_users(request.user)
+    attempts = ExamAttempt.objects.all()
+    exams = Exam.objects.all()
+    if dept:
+        attempts = attempts.filter(user__department=dept)
+        exams = exams.filter(created_by__department=dept)
+    return users, attempts, exams
+
+
 class AdminDashboardView(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser, CanViewDashboard]
+    permission_classes = [IsAdmin, CanViewDashboard]
 
     def get(self, request):
         now = timezone.now()
         today = now.date()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        users, attempts, exams = scoped(request)
 
-        # ── Stats ────────────────────────────────────────────────────────
-        total_users = User.objects.count()
-        new_this_month = User.objects.filter(date_joined__gte=month_start).count()
+        total_users = users.count()
+        new_this_month = users.filter(date_joined__gte=month_start).count()
+        active_exams = exams.filter(is_active=True).count()
+        completed_today = attempts.filter(created_at__date=today).count()
 
-        active_exams = Exam.objects.filter(is_active=True).count()
-
-        completed_today = ExamAttempt.objects.filter(created_at__date=today).count()
-
-        avg_seconds = ExamAttempt.objects.aggregate(avg=Avg('time_taken_seconds'))['avg'] or 0
+        avg_seconds = attempts.aggregate(avg=Avg('time_taken_seconds'))['avg'] or 0
         avg_minutes = round(avg_seconds / 60) if avg_seconds else 0
 
         stats = [
@@ -53,7 +67,6 @@ class AdminDashboardView(APIView):
              'sub': 'All exam types', 'icon': 'Clock', 'color': 'amber'},
         ]
 
-        # ── Recent users ─────────────────────────────────────────────────
         recent_users = [
             {
                 'name': u.name,
@@ -61,20 +74,17 @@ class AdminDashboardView(APIView):
                 'role': u.role,
                 'status': 'active' if u.is_active else 'inactive',
             }
-            for u in User.objects.order_by('-date_joined')[:5]
+            for u in users.order_by('-date_joined')[:5]
         ]
 
-        # ── Activity feed (merged from two sources, sorted, trimmed) ──────
         activity = []
-
-        for u in User.objects.order_by('-date_joined')[:5]:
+        for u in users.order_by('-date_joined')[:5]:
             activity.append({
                 'text': f'New user registered — {u.email}',
                 'timestamp': u.date_joined,
                 'color': 'purple',
             })
-
-        for a in ExamAttempt.objects.select_related('user').order_by('-created_at')[:5]:
+        for a in attempts.select_related('user').order_by('-created_at')[:5]:
             activity.append({
                 'text': f'"{a.label}" submitted by {a.user.name} — {a.percentage}%',
                 'timestamp': a.created_at,
@@ -96,12 +106,11 @@ class AdminDashboardView(APIView):
 class AdminReportsView(APIView):
     """Read-only aggregation ng ExamAttempt records — powers ang ReportsPage."""
     authentication_classes = [JWTAuthentication]
-    permission_classes = [permissions.IsAdminUser, CanViewReports]
+    permission_classes = [IsAdmin, CanViewReports]
 
     def get(self, request):
-        attempts = ExamAttempt.objects.all()
+        _, attempts, _ = scoped(request)
 
-        # ── Summary stats ───────────────────────────────────────────────
         total_submissions = attempts.count()
         avg_score = attempts.aggregate(avg=Avg('percentage'))['avg'] or 0
         active_students = attempts.values('user').distinct().count()
@@ -115,7 +124,6 @@ class AdminReportsView(APIView):
             'avg_duration_minutes': avg_minutes,
         }
 
-        # ── Per-exam breakdown (grouped by label) ─────────────────────────
         grouped = (
             attempts.values('label')
             .annotate(
@@ -130,10 +138,8 @@ class AdminReportsView(APIView):
         exam_rows = []
         for row in grouped:
             submissions = row['submissions']
-            passed_count = row['passed_count']
-            pass_rate = round((passed_count / submissions) * 100) if submissions else 0
+            pass_rate = round((row['passed_count'] / submissions) * 100) if submissions else 0
             avg_duration_min = round((row['avg_duration'] or 0) / 60)
-
             exam_rows.append({
                 'exam': row['label'],
                 'submissions': submissions,
@@ -142,25 +148,26 @@ class AdminReportsView(APIView):
                 'avg_duration': f'{avg_duration_min} min',
             })
 
-        return Response({
-            'summary': summary,
-            'exam_stats': exam_rows,
-        }, status=status.HTTP_200_OK)
+        return Response({'summary': summary, 'exam_stats': exam_rows}, status=status.HTTP_200_OK)
 
 
 class StudentMonitorView(APIView):
-    """Per-student scores/attempts + class-wide weak areas — powers StudentMonitorPage."""
+    """Per-student scores/attempts + class-wide weak areas — powers StudentMonitorPage.
+    Sariling department lang ng instructor ang makikitang students."""
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsInstructor, CanViewReports]
 
     def get(self, request):
-        # Only look at students who attempted exams in this instructor's categories
         instructor_categories = list(
             Exam.objects.filter(created_by=request.user).values_list('category', flat=True).distinct()
         )
-        attempts = ExamAttempt.objects.filter(category__in=instructor_categories) if instructor_categories else ExamAttempt.objects.all()
+        attempts = (
+            ExamAttempt.objects.filter(category__in=instructor_categories)
+            if instructor_categories else ExamAttempt.objects.all()
+        )
+        if request.user.department:
+            attempts = attempts.filter(user__department=request.user.department)
 
-        # ── Per-student breakdown ──────────────────────────────────────
         student_ids = attempts.values_list('user', flat=True).distinct()
         students = []
 
@@ -177,7 +184,9 @@ class StudentMonitorView(APIView):
                 attempt_counts[cat] = cat_attempts.count()
 
             last_attempt = user_attempts.order_by('-created_at').first()
-            last_active = relative_time(last_attempt.created_at, timezone.now()) if last_attempt else 'Never'
+            last_active = (
+                relative_time(last_attempt.created_at, timezone.now()) if last_attempt else 'Never'
+            )
 
             students.append({
                 'id': user.id,
@@ -188,9 +197,7 @@ class StudentMonitorView(APIView):
                 'lastActive': last_active,
             })
 
-        # ── Weak areas (from subject_breakdown JSON on each attempt) ────
-        # Expected shape per attempt.subject_breakdown:
-        #   {"Topic Name": {"correct": 3, "total": 5}, ...}
+        # subject_breakdown shape: {"Topic": {"correct": 3, "total": 5}, ...}
         topic_totals = {}
         for a in attempts.exclude(subject_breakdown={}):
             for topic, stats in a.subject_breakdown.items():

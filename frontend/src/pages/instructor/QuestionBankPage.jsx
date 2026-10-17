@@ -1,18 +1,18 @@
-// 📁 frontend/src/pages/instructor/QuestionBankPage.jsx
 import { useState, useRef } from 'react';
-import { BookOpen, Plus, Search, Edit2, Trash2, X, Upload, FileText, CheckCircle, AlertCircle, Copy, ClipboardCheck, AlertTriangle } from 'lucide-react';
+import { BookOpen, Plus, Search, Edit2, Trash2, X, Upload, FileText, CheckCircle, AlertCircle, Copy, ClipboardCheck } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import useQuestionBank from '../../hooks/useQuestionBank';
 import useAuthStore from '../../auth/useAuthStore';
+import MajorPicker from '../../components/MajorPicker';
+import apiError from '../../utils/apiError';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const CATEGORIES = ['All', 'GenEd', 'ProfEd', 'Major'];
 
 // Pulls text out of a PDF while preserving line breaks (detected via
-// vertical position changes between text fragments). Flat extraction loses
-// line structure, which the structured parser below depends on.
+// vertical position changes between text fragments).
 async function extractPdfLines(file) {
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
@@ -36,6 +36,15 @@ async function extractPdfLines(file) {
   }
   return lines;
 }
+
+// ── Structured exam parser ──────────────────────────────────────────────
+//   1. Question stem...
+//   A. Choice  B. Choice  C. Choice  D. Choice   (bawat choice sa hiwalay na linya)
+//   Part II: Answer Key and Detailed Explanations
+//   41. C. Semantic
+//   Rationale: ...
+//   Wrong Answer Explanation:
+//   A. ...  B. ...  D. ...
 
 function splitQuestionsAndKey(lines) {
   const splitIdx = lines.findIndex((l) => /answer\s*key/i.test(l));
@@ -112,8 +121,7 @@ function parseAnswerKeyLines(lines) {
       continue;
     }
 
-    const wrongHeaderMatch = line.match(wrongHeaderRe);
-    if (wrongHeaderMatch) {
+    if (line.match(wrongHeaderRe)) {
       state = 'wrong';
       continue;
     }
@@ -161,6 +169,7 @@ function mergeExamText(text) {
       return;
     }
 
+    // Tamang sagot → rationale; mali → Wrong Answer Explanation ng letter na 'yon.
     const choiceExplanations = ['A', 'B', 'C', 'D'].map((letter, i) => {
       if (i === answerIndex) return (key.rationale || '').trim();
       return (key.wrongExplanations[letter] || '').trim();
@@ -185,11 +194,13 @@ const EMPTY_FORM = {
   question: '', category: 'GenEd', subject: '', difficulty: 'Medium',
   choices: ['', '', '', ''], answer: 0, explanation: '',
   choice_explanations: ['', '', '', ''],
+  major: '',
 };
 
 export default function QuestionBankPage() {
-  const { questions, loading, addQuestion, addQuestions, updateQuestion, removeQuestion, bulkRemoveQuestions } = useQuestionBank();
+  const { questions, loading, addQuestion, addQuestions, updateQuestion, removeQuestion } = useQuestionBank();
   const { user } = useAuthStore();
+
   const [search, setSearch]       = useState('');
   const [filter, setFilter]       = useState('All');
   const [showModal, setShowModal] = useState(false);
@@ -201,23 +212,27 @@ export default function QuestionBankPage() {
   const [pdfCategory, setPdfCategory] = useState('GenEd');
   const [pdfSubject, setPdfSubject] = useState('');
   const [pdfDifficulty, setPdfDifficulty] = useState('Medium');
+  const [pdfMajor, setPdfMajor] = useState('');
   const [pdfCopied, setPdfCopied] = useState(false);
   const [showPdfRaw, setShowPdfRaw] = useState(false);
   const pdfRef = useRef();
   const [editItem,  setEditItem]  = useState(null);
   const [form, setForm]           = useState(EMPTY_FORM);
   const [saving, setSaving]       = useState(false);
-  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
 
+  // Sariling questions lang ang binabalik ng backend para sa instructor.
   const filtered = questions.filter((q) => {
     const matchSearch = q.question.toLowerCase().includes(search.toLowerCase());
     const matchCat    = filter === 'All' || q.category === filter;
-    const matchDept    = q.category !== 'Major' || q.department === user?.department;
-    return matchSearch && matchCat && matchDept;
+    return matchSearch && matchCat;
   });
 
-  const openAdd  = () => { setEditItem(null); setForm(EMPTY_FORM); setShowModal(true); };
+  const openAdd = () => {
+    setEditItem(null);
+    setForm({ ...EMPTY_FORM });
+    setShowModal(true);
+  };
+
   const openEdit = (q) => {
     setEditItem(q.id);
     setForm({
@@ -227,9 +242,11 @@ export default function QuestionBankPage() {
       choice_explanations: q.choice_explanations && q.choice_explanations.length === 4
         ? [...q.choice_explanations]
         : ['', '', '', ''],
+      major: q.major || '',
     });
     setShowModal(true);
   };
+
   const closeModal = () => { setShowModal(false); setForm(EMPTY_FORM); setEditItem(null); };
 
   const handleChoiceChange = (i, val) => {
@@ -245,9 +262,16 @@ export default function QuestionBankPage() {
   const handleSave = async () => {
     if (!form.question.trim()) return alert('Question text is required.');
     if (form.choices.some((c) => !c.trim())) return alert('All 4 choices are required.');
+    if (form.category === 'Major' && !form.major) return alert('Select a major for this question.');
     setSaving(true);
 
-    const payload = { ...form, subject: form.subject.trim() || form.category };
+    const payload = {
+      ...form,
+      subject: form.subject.trim() || (form.category === 'Major' ? form.major : form.category),
+      major: form.category === 'Major' ? form.major : null,
+    };
+    // Hinuhulaan na ng backend ang department mula sa major
+    delete payload.department;
 
     try {
       if (editItem) {
@@ -257,7 +281,7 @@ export default function QuestionBankPage() {
       }
       closeModal();
     } catch (err) {
-      alert(err.response?.data?.detail || err.message || 'Failed to save question.');
+      alert(apiError(err, 'Failed to save question.'));
     } finally {
       setSaving(false);
     }
@@ -268,26 +292,7 @@ export default function QuestionBankPage() {
     try {
       await removeQuestion(id);
     } catch (err) {
-      alert(err.response?.data?.detail || err.message || 'Failed to delete question.');
-    }
-  };
-
-  // ---------- Bulk delete ----------
-  // Scoped to whatever category tab is currently active (All / GenEd / ProfEd / Major),
-  // so the same filter tabs double as the delete-scope picker — no separate dropdown needed.
-  const bulkDeleteCount = filter === 'All'
-    ? questions.filter((q) => q.category !== 'Major' || q.department === user?.department).length
-    : filtered.length;
-
-  const handleBulkDelete = async () => {
-    setBulkDeleting(true);
-    try {
-      await bulkRemoveQuestions(filter);
-      setShowBulkDeleteConfirm(false);
-    } catch (err) {
-      alert(err.response?.data?.detail || err.message || 'Failed to delete questions.');
-    } finally {
-      setBulkDeleting(false);
+      alert(apiError(err, 'Failed to delete question.'));
     }
   };
 
@@ -338,16 +343,18 @@ export default function QuestionBankPage() {
 
   const handleConfirmPdfImport = async () => {
     if (!pdfParsed?.valid.length) return;
+    if (pdfCategory === 'Major' && !pdfMajor) return alert('Select a major for these questions.');
     try {
       await addQuestions(pdfParsed.valid.map((q) => ({
         ...q,
         category: pdfCategory,
-        subject: pdfSubject.trim() || pdfCategory,
+        subject: pdfSubject.trim() || (pdfCategory === 'Major' ? pdfMajor : pdfCategory),
         difficulty: pdfDifficulty,
+        major: pdfCategory === 'Major' ? pdfMajor : null,
       })));
       closeImport();
     } catch (err) {
-      alert(err.response?.data?.detail || err.message || 'Failed to import questions.');
+      alert(apiError(err, 'Failed to import questions.'));
     }
   };
 
@@ -360,7 +367,7 @@ export default function QuestionBankPage() {
       <div className="inst-topbar">
         <div className="inst-topbar-left">
           <h1>Question Bank</h1>
-          <p>{questions.length} questions total — add manually or import from PDF. Major questions are scoped to your department ({user?.department || '—'}).</p>
+          <p>{questions.length} questions total — add manually or import from PDF. Major questions are tagged to one {user?.department || ''} major.</p>
         </div>
         <div className="inst-topbar-right">
           <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={() => setShowImport(true)}>
@@ -375,19 +382,10 @@ export default function QuestionBankPage() {
       <div className="inst-content">
         <div className="inst-card">
           <div className="inst-card-header">
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {CATEGORIES.map((cat) => (
                 <button key={cat} className={`inst-btn inst-btn-sm ${filter === cat ? 'inst-btn-primary' : 'inst-btn-secondary'}`} onClick={() => setFilter(cat)}>{cat}</button>
               ))}
-              <button
-                className="inst-btn inst-btn-sm"
-                onClick={() => setShowBulkDeleteConfirm(true)}
-                disabled={bulkDeleteCount === 0}
-                style={{ color: 'var(--inst-danger)', borderColor: 'var(--inst-danger)', marginLeft: 4 }}
-                title={filter === 'All' ? 'Delete all questions you can see' : `Delete all ${filter} questions`}
-              >
-                <Trash2 size={13} /> Delete {filter === 'All' ? 'All' : filter} ({bulkDeleteCount})
-              </button>
             </div>
             <div className="inst-search">
               <Search size={15} />
@@ -401,7 +399,8 @@ export default function QuestionBankPage() {
             <table className="inst-table">
               <thead>
                 <tr>
-                  <th style={{ width: '42%' }}>Question</th>
+                  <th style={{ width: 44 }}>#</th>
+                  <th style={{ width: '40%' }}>Question</th>
                   <th>Category</th>
                   <th>Subject</th>
                   <th>Difficulty</th>
@@ -410,10 +409,15 @@ export default function QuestionBankPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((q) => (
+                {filtered.map((q, idx) => (
                   <tr key={q.id}>
+                    <td style={{ fontSize: 12.5, color: 'var(--inst-text-muted)', fontWeight: 600 }}>{idx + 1}</td>
                     <td style={{ fontWeight: 500, fontSize: 13 }}>{q.question}</td>
-                    <td><span className={CATEGORY_BADGE[q.category]}>{q.category === 'Major' && q.department ? `Major (${q.department})` : q.category}</span></td>
+                    <td>
+                      <span className={CATEGORY_BADGE[q.category]}>
+                        {q.category === 'Major' ? `Major (${q.major || 'Untagged'})` : q.category}
+                      </span>
+                    </td>
                     <td style={{ fontSize: 12.5, color: 'var(--inst-text-sub)' }}>{q.subject || '—'}</td>
                     <td><span className={DIFFICULTY_BADGE[q.difficulty]}>{q.difficulty}</span></td>
                     <td>
@@ -439,41 +443,6 @@ export default function QuestionBankPage() {
         </div>
       </div>
 
-      {/* Bulk Delete Confirm Modal */}
-      {showBulkDeleteConfirm && (
-        <div className="inst-modal-backdrop" onClick={() => !bulkDeleting && setShowBulkDeleteConfirm(false)}>
-          <div className="inst-modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-            <div className="inst-modal-header">
-              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AlertTriangle size={17} style={{ color: 'var(--inst-danger)' }} /> Confirm bulk delete
-              </h3>
-              <button className="inst-btn-icon" onClick={() => setShowBulkDeleteConfirm(false)} disabled={bulkDeleting}><X size={16} /></button>
-            </div>
-            <div className="inst-modal-body">
-              <p style={{ fontSize: 13.5, color: 'var(--inst-text)', lineHeight: 1.6, margin: 0 }}>
-                This will permanently delete{' '}
-                <strong>{bulkDeleteCount} question{bulkDeleteCount === 1 ? '' : 's'}</strong>
-                {filter === 'All' ? ' — every question you can currently see' : <> in the <strong>{filter}</strong> category</>}.
-                Any exam that includes these questions will also lose them. This cannot be undone.
-              </p>
-            </div>
-            <div className="inst-modal-footer">
-              <button className="inst-btn inst-btn-secondary inst-btn-sm" onClick={() => setShowBulkDeleteConfirm(false)} disabled={bulkDeleting}>
-                Cancel
-              </button>
-              <button
-                className="inst-btn inst-btn-sm"
-                onClick={handleBulkDelete}
-                disabled={bulkDeleting}
-                style={{ background: 'var(--inst-danger)', color: '#fff', border: 'none' }}
-              >
-                {bulkDeleting ? 'Deleting...' : `Delete ${bulkDeleteCount} question${bulkDeleteCount === 1 ? '' : 's'}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Add/Edit Modal */}
       {showModal && (
         <div className="inst-modal-backdrop" onClick={closeModal}>
@@ -497,8 +466,8 @@ export default function QuestionBankPage() {
                   </select>
                 </div>
                 <div className="inst-form-group">
-                  <label className="inst-form-label">Subject <span className="inst-form-label-sub">· e.g. Mathematics</span></label>
-                  <input className="inst-form-input" placeholder="Mathematics, Science, English..." value={form.subject} onChange={(e) => setForm((p) => ({ ...p, subject: e.target.value }))} />
+                  <label className="inst-form-label">Subject <span className="inst-form-label-sub">· optional</span></label>
+                  <input className="inst-form-input" placeholder={form.category === 'Major' ? (form.major || 'Defaults to the major') : 'Mathematics, Science, English...'} value={form.subject} onChange={(e) => setForm((p) => ({ ...p, subject: e.target.value }))} />
                 </div>
                 <div className="inst-form-group">
                   <label className="inst-form-label">Difficulty</label>
@@ -509,6 +478,15 @@ export default function QuestionBankPage() {
                   </select>
                 </div>
               </div>
+
+              {form.category === 'Major' && (
+                <MajorPicker
+                  department={user?.department}
+                  label="Major"
+                  value={form.major}
+                  onChange={(m) => setForm((p) => ({ ...p, major: m }))}
+                />
+              )}
 
               <div className="inst-form-group">
                 <label className="inst-form-label">
@@ -616,6 +594,17 @@ export default function QuestionBankPage() {
                           <option value="Hard">Hard</option>
                         </select>
                       </div>
+                    </div>
+                  )}
+
+                  {pdfParsed.valid.length > 0 && pdfCategory === 'Major' && (
+                    <div style={{ marginBottom: 16 }}>
+                      <MajorPicker
+                        department={user?.department}
+                        label="Major"
+                        value={pdfMajor}
+                        onChange={setPdfMajor}
+                      />
                     </div>
                   )}
 

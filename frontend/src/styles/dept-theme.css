@@ -1,0 +1,137 @@
+/* Department theme: iisang design, magkaibang kulay.
+   CTE = blue, CIT = orange. Sakop ang User, Instructor, at Department Admin shells,
+   pati ang SIDEBAR (kulay ng department ang buong sidebar).
+   Ang Super Admin ay walang data-dept, kaya neutral (default admin) ang kulay niya. */
+
+.dept-shell[data-dept="CTE"] {
+  --dept-accent: #2563eb;
+  --dept-accent-dark: #1d4ed8;
+  --dept-accent-soft: rgba(37, 99, 235, 0.08);
+  --dept-accent-mid: rgba(37, 99, 235, 0.2);
+  --dept-side-bg: linear-gradient(180deg, #1d4ed8 0%, #1e3a8a 100%);
+}
+.dept-shell[data-dept="CIT"] {
+  --dept-accent: #ea580c;
+  --dept-accent-dark: #c2410c;
+  --dept-accent-soft: rgba(234, 88, 12, 0.08);
+  --dept-accent-mid: rgba(234, 88, 12, 0.2);
+  --dept-side-bg: linear-gradient(180deg, #ea580c 0%, #9a3412 100%);
+}
+
+/* Kulay ng text sa loob ng colored sidebar */
+.dept-shell {
+  --dept-side-title: #ffffff;
+  --dept-side-text: rgba(255, 255, 255, 0.84);
+  --dept-side-dim: rgba(255, 255, 255, 0.62);
+  --dept-side-border: rgba(255, 255, 255, 0.2);
+  --dept-side-hover: rgba(255, 255, 255, 0.14);
+  --dept-side-active: rgba(255, 255, 255, 0.24);
+  --dept-side-chip: rgba(255, 255, 255, 0.22);
+}
+
+/* ── Ipasa ang accent sa existing tokens ─────────────────────────────────── */
+.user-shell.dept-shell {
+  --user-accent: var(--dept-accent);
+  --user-accent-soft: var(--dept-accent-soft);
+  --user-accent-mid: var(--dept-accent-mid);
+}
+.inst-shell.dept-shell {
+  --inst-accent: var(--dept-accent);
+  --inst-accent-soft: var(--dept-accent-soft);
+  --inst-accent-mid: var(--dept-accent-mid);
+}
+.admin-shell.dept-shell {
+  --admin-accent: var(--dept-accent);
+  --admin-accent-soft: var(--dept-accent-soft);
+  --admin-accent-mid: var(--dept-accent-mid);
+}
+
+/* ── Sidebar: User + Instructor ──────────────────────────────────────────── */
+.user-shell.dept-shell .user-sidebar,
+.inst-shell.dept-shell .inst-sidebar {
+  background: var(--dept-side-bg);
+  border-right: none;
+}
+.user-shell.dept-shell .user-brand,
+.inst-shell.dept-shell .inst-brand,
+.user-shell.dept-shell .user-sidebar-footer,
+.inst-shell.dept-shell .inst-sidebar-footer {
+  border-color: var(--dept-side-border);
+}
+.user-shell.dept-shell .user-brand-icon,
+.inst-shell.dept-shell .inst-brand-icon,
+.user-shell.dept-shell .user-avatar,
+.inst-shell.dept-shell .inst-avatar {
+  background: var(--dept-side-chip);
+  color: #ffffff;
+}
+.user-shell.dept-shell .user-brand-text span:first-child,
+.inst-shell.dept-shell .inst-brand-text span:first-child,
+.user-shell.dept-shell .user-name,
+.inst-shell.dept-shell .inst-user-name { color: var(--dept-side-title); }
+.user-shell.dept-shell .user-brand-text span:last-child,
+.inst-shell.dept-shell .inst-brand-text span:last-child,
+.user-shell.dept-shell .user-sidebar-label,
+.inst-shell.dept-shell .inst-sidebar-label,
+.user-shell.dept-shell .user-role-label,
+.inst-shell.dept-shell .inst-user-role,
+.user-shell.dept-shell .user-logout-btn,
+.inst-shell.dept-shell .inst-logout-btn { color: var(--dept-side-dim); }
+
+.user-shell.dept-shell .user-nav-item,
+.inst-shell.dept-shell .inst-nav-item { color: var(--dept-side-text); }
+.user-shell.dept-shell .user-nav-item:hover,
+.inst-shell.dept-shell .inst-nav-item:hover {
+  background: var(--dept-side-hover);
+  color: #ffffff;
+}
+.user-shell.dept-shell .user-nav-item.active,
+.inst-shell.dept-shell .inst-nav-item.active {
+  background: var(--dept-side-active);
+  color: #ffffff;
+}
+.user-shell.dept-shell .user-logout-btn:hover,
+.inst-shell.dept-shell .inst-logout-btn:hover { color: #ffffff; }
+
+/* ── Sidebar: Department Admin ───────────────────────────────────────────── */
+.admin-shell.dept-shell .admin-sidebar {
+  background: var(--dept-side-bg);
+  border-right: none;
+}
+.admin-shell.dept-shell .sidebar-brand,
+.admin-shell.dept-shell .sidebar-footer {
+  border-color: var(--dept-side-border);
+}
+.admin-shell.dept-shell .sidebar-brand-icon,
+.admin-shell.dept-shell .sidebar-avatar {
+  background: var(--dept-side-chip);
+  color: #ffffff;
+}
+.admin-shell.dept-shell .sidebar-brand-text span:first-child,
+.admin-shell.dept-shell .sidebar-user-name { color: var(--dept-side-title); }
+.admin-shell.dept-shell .sidebar-brand-text span:last-child,
+.admin-shell.dept-shell .sidebar-section-label,
+.admin-shell.dept-shell .sidebar-user-role,
+.admin-shell.dept-shell .sidebar-logout-btn { color: var(--dept-side-dim); }
+
+.admin-shell.dept-shell .sidebar-nav-item { color: var(--dept-side-text); }
+.admin-shell.dept-shell .sidebar-nav-item:hover {
+  background: var(--dept-side-hover);
+  color: #ffffff;
+}
+.admin-shell.dept-shell .sidebar-nav-item.active {
+  background: var(--dept-side-active);
+  color: #ffffff;
+}
+.admin-shell.dept-shell .sidebar-user:hover { background: var(--dept-side-hover); }
+.admin-shell.dept-shell .sidebar-logout-btn:hover { color: #ffffff; }
+
+/* ── Department Admin: buttons (admin.css has a hardcoded purple hover) ──── */
+.admin-shell.dept-shell .btn-primary {
+  background: var(--dept-accent);
+  border-color: var(--dept-accent);
+}
+.admin-shell.dept-shell .btn-primary:hover {
+  background: var(--dept-accent-dark);
+  box-shadow: 0 4px 12px var(--dept-accent-mid);
+}

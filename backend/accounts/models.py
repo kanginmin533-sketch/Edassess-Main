@@ -1,16 +1,59 @@
 # backend/accounts/models.py
+from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 
 
+# ── Majors per department ──────────────────────────────────────────────────
+# Student: isa lang ang major (pinipili sa registration). Major exams/questions
+# ay naka-tag sa isa sa mga ito, at ang department ay hinuhulaan mula sa major.
+MAJORS_BY_DEPARTMENT = {
+    'CTE': [
+        'Mathematics',
+        'English',
+        'Filipino',
+        'Science',
+        'Social Studies',
+        'Physical Education',
+    ],
+    'CIT': [
+        'Automotive Technology',
+        'Computer Programming',
+        'Construction/Civil Technology',
+        'Electrical Technology',
+        'Food Services Management',
+        'Mechanical Technology',
+        'Industrial Arts',
+    ],
+}
+
+MAJOR_CHOICES = tuple(
+    (m, m) for majors in MAJORS_BY_DEPARTMENT.values() for m in majors
+)
+
+
+def majors_for(department):
+    return MAJORS_BY_DEPARTMENT.get(department, [])
+
+
+def department_of_major(major):
+    for dept, majors in MAJORS_BY_DEPARTMENT.items():
+        if major in majors:
+            return dept
+    return None
+
+
 class UserManager(BaseUserManager):
-    def create_user(self, email, name, password=None, role='user', department=None):
+    def create_user(self, email, name, password=None, role='user', department=None, major=None):
         if not email:
             raise ValueError('Users must have an email address.')
         if not name:
             raise ValueError('Users must have a name.')
 
-        user = self.model(email=self.normalize_email(email), name=name, role=role, department=department)
+        user = self.model(
+            email=self.normalize_email(email), name=name, role=role,
+            department=department, major=major or None,
+        )
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -37,7 +80,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     DEPT_CIT = 'CIT'
     DEPT_CTE = 'CTE'
     DEPARTMENT_CHOICES = (
-        (DEPT_CIT, 'College of Information Technology'),
+        (DEPT_CIT, 'College of Industrial Technology'),
         (DEPT_CTE, 'College of Teacher Education'),
     )
 
@@ -45,9 +88,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     name = models.CharField(max_length=255)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_STUDENT)
 
-    # Aplikable lang kapag role == instructor. Ginagamit para i-tag kung saang
-    # college nakalagay ang instructor — nagde-drive ito ng CIT vs CTE UI/routing.
+    # Student/Instructor: CIT o CTE.
+    # Admin: CIT/CTE = department admin; walang laman = super admin.
     department = models.CharField(max_length=10, choices=DEPARTMENT_CHOICES, blank=True, null=True)
+
+    # Student lang: ang major niya (tugma sa department). Instructor/admin: walang laman.
+    major = models.CharField(max_length=40, choices=MAJOR_CHOICES, blank=True, null=True)
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -60,7 +106,13 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f'{self.name} <{self.email}> ({self.role})'
-    
+
+    @property
+    def is_super_admin(self):
+        # Admin na walang department = super admin
+        return self.role == self.ROLE_ADMIN and not self.department
+
+
 def default_role_permissions():
     return {
         'admin': {
@@ -119,7 +171,8 @@ class RolePermission(models.Model):
 
     def __str__(self):
         return "Role Permission Matrix"
-    
+
+
 class SystemSettings(models.Model):
     """Singleton row — laging pk=1. Global platform settings dito nakatago."""
     systemName = models.CharField(max_length=255, default='EduAssess')
@@ -154,3 +207,68 @@ class SystemSettings(models.Model):
 
     def __str__(self):
         return "System Settings"
+
+
+# Mga permission na puwedeng galawin ng department admin para sa sarili niyang department.
+# Ang super admin ang nagtatakda ng "ceiling" (RolePermission); ang department admin
+# ay puwede lang mag-off ng mga ito para sa instructors/students ng department niya.
+DEPT_CONTROLLABLE = {
+    'instructor': ['viewDashboard', 'configureExams', 'viewReports', 'viewReviewModules'],
+    'user': ['viewDashboard', 'takeExams', 'viewReviewModules'],
+}
+
+
+def default_department_permissions():
+    return {role: {key: True for key in keys} for role, keys in DEPT_CONTROLLABLE.items()}
+
+
+class DepartmentPermission(models.Model):
+    """Isang row per department (CIT / CTE). Default: lahat naka-on (sakop pa rin ng ceiling ng super admin)."""
+    department = models.CharField(max_length=10, choices=User.DEPARTMENT_CHOICES, unique=True)
+    permissions = models.JSONField(default=default_department_permissions)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Department Permissions"
+        verbose_name_plural = "Department Permissions"
+
+    @classmethod
+    def load(cls, department):
+        obj, _created = cls.objects.get_or_create(department=department)
+        return obj
+
+    def __str__(self):
+        return f"{self.department} Permissions"
+
+
+class ActivityLog(models.Model):
+    """
+    Audit trail. Super admin lang ang may access.
+    Naka-snapshot ang pangalan/email/role ng actor para mababasa pa rin
+    ang log kahit ma-delete na ang account.
+    `department` = department na apektado ng action (None = global).
+    """
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='activity_logs',
+    )
+    actor_name = models.CharField(max_length=255, blank=True)
+    actor_email = models.CharField(max_length=255, blank=True)
+    actor_role = models.CharField(max_length=20, blank=True)
+    actor_department = models.CharField(max_length=10, blank=True, null=True)
+
+    department = models.CharField(max_length=10, blank=True, null=True, db_index=True)
+    category = models.CharField(max_length=30, db_index=True)
+    action = models.CharField(max_length=60)
+    description = models.TextField()
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f'[{self.created_at:%Y-%m-%d %H:%M}] {self.actor_email or "system"} — {self.action}'

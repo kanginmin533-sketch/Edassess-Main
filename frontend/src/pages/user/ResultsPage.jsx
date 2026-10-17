@@ -4,6 +4,8 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { CheckCircle, XCircle, RotateCcw, Home, Clock, TrendingDown, BookOpen, Download } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { examApi } from '../../api/examApi';
+import useExamHistory from '../../hooks/useExamHistory';
+import { LET_CATEGORIES, GWA_WEIGHTS, PASSING_GWA, computeGwa, points, fmt } from '../../utils/gwa';
 
 const scoreColor = (pct) =>
   pct >= 80 ? 'var(--user-accent)' : pct >= 75 ? 'var(--user-amber)' : 'var(--user-danger)';
@@ -35,6 +37,7 @@ export default function ResultsPage() {
   const { state } = useLocation();
   const navigate   = useNavigate();
   const { attemptId } = useParams();
+  const { history } = useExamHistory(); // ← para sa GWA (dapat nasa taas, bago ang early returns)
 
   const [fetchedState, setFetchedState] = useState(null);
   const [fetching, setFetching] = useState(!state && !!attemptId);
@@ -80,9 +83,13 @@ export default function ResultsPage() {
 
   const subjectEntries = Object.entries(subjectBreakdown);
 
-    // Note: the attempt is already saved to the backend by ExamPage
-    // (examApi.createAttempt) before navigating here — nothing to save
-    // in this page anymore.
+  // GWA: score ng exam na 'to para sa category niya + pinakahuling score sa ibang dalawa.
+  // (Nauuna ang exam na 'to sa listahan, kaya ito ang mananaig para sa category niya.)
+  const gwa = computeGwa([{ short, percentage }, ...(history || [])]);
+
+  // Note: the attempt is already saved to the backend by ExamPage
+  // (examApi.createAttempt) before navigating here — nothing to save
+  // in this page anymore.
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
@@ -118,10 +125,32 @@ export default function ResultsPage() {
       });
     }
 
+    // ── Overall GWA ──
+    if (y > 225) { doc.addPage(); y = 20; }
+    y += 6;
+    doc.setFontSize(13);
+    doc.text('Overall GWA (GenEd 20% / ProfEd 40% / Major 40%)', 14, y);
+    y += 8;
+    doc.setFontSize(11);
+    LET_CATEGORIES.forEach((cat) => {
+      const a = gwa.latestByCategory[cat];
+      doc.text(
+        a
+          ? `${cat}: ${a.percentage}% x ${GWA_WEIGHTS[cat]} = ${fmt(points(a.percentage, cat))} pts`
+          : `${cat}: not taken yet`,
+        14, y
+      );
+      y += 7;
+    });
+    doc.text(
+      gwa.complete
+        ? `Overall GWA: ${fmt(gwa.gwa)}% — ${gwa.passed ? 'PASSED' : 'NOT YET'} (passing ${PASSING_GWA}%)`
+        : `Overall GWA: pending (missing ${gwa.missing.join(', ')})`,
+      14, y
+    );
+
     doc.save(`${(short || 'exam').replace(/\s+/g, '_')}-result-summary.pdf`);
   };
-
-  const wrongQuestions = questions.filter((_, i) => answers[i] !== questions[i]?.answer);
 
   return (
     <>
@@ -159,7 +188,7 @@ export default function ResultsPage() {
                 )}
                 <div className={`result-score-circle ${passed ? 'pass' : 'fail'}`}>
                   <span className="result-score-num">{score}/{total}</span>
-                  <span className="result-score-pct">Score</span>
+                  <span className="result-score-pct">{percentage}%</span>
                 </div>
                 <h2 className="result-verdict">{passed ? '🎉 Passed!' : '😔 Not Yet'}</h2>
                 <p className="result-verdict-sub">
@@ -187,7 +216,7 @@ export default function ResultsPage() {
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
                     <span style={{ color: 'var(--user-text-sub)' }}>Your Score</span>
-                    <span style={{ color: scoreColor(percentage) }}>{score}/{total}</span>
+                    <span style={{ color: scoreColor(percentage) }}>{score}/{total} ({percentage}%)</span>
                   </div>
                   <div style={{ height: 10, background: 'var(--user-border)', borderRadius: 5, overflow: 'hidden', position: 'relative' }}>
                     <div style={{ height: '100%', width: `${percentage}%`, background: scoreColor(percentage), borderRadius: 5, transition: 'width 0.6s' }} />
@@ -196,8 +225,7 @@ export default function ResultsPage() {
                   <div style={{ fontSize: 11, color: 'var(--user-text-muted)', marginTop: 4, textAlign: 'right' }}>Passing: {passingScore}/{total}</div>
                 </div>
 
-                {/* PRC area-minimum reminder — this is a single-area score, not the
-                    final LET verdict. The real combined rule lives on the Dashboard. */}
+                {/* Reminder: single-area score ito, hindi pa ang final LET verdict. */}
                 <div style={{
                   display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 4,
                   padding: '10px 14px', borderRadius: 'var(--user-radius)',
@@ -210,9 +238,76 @@ export default function ResultsPage() {
                   <p style={{ margin: 0, fontSize: 11.5, color: 'var(--user-text-sub)', lineHeight: 1.6 }}>
                     {percentage < 50
                       ? <>Under PRC rules, a score below 50% in any single area fails the LET regardless of your average in the other areas. This {short} attempt is below that minimum.</>
-                      : <>This {short} score is above the 50% area minimum required by PRC. Official LET standing needs a 75% average combined with GenEd, ProfEd, and Major — check your <strong>Overall LET Standing</strong> on the Dashboard.</>}
+                      : <>This {short} score is above the 50% area minimum required by PRC. Your official standing uses the weighted <strong>Overall GWA</strong> (GenEd 20%, ProfEd 40%, Major 40%) with a {PASSING_GWA}% passing mark — see below.</>}
                   </p>
                 </div>
+              </div>
+            </div>
+
+            {/* Overall GWA */}
+            <div className="user-card">
+              <div className="user-card-header">
+                <div>
+                  <h3>Overall GWA</h3>
+                  <p>GenEd 20% + ProfEd 40% + Major 40% · passing {PASSING_GWA}%</p>
+                </div>
+                {gwa.complete && (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1, color: gwa.passed ? 'var(--user-accent)' : 'var(--user-danger)' }}>
+                      {fmt(gwa.gwa)}%
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--user-text-muted)', marginTop: 2 }}>
+                      {gwa.passed ? 'Passing' : 'Not yet'}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="user-card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {LET_CATEGORIES.map((cat) => {
+                  const a = gwa.latestByCategory[cat];
+                  const isThis = cat === short;
+                  return (
+                    <div
+                      key={cat}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                        padding: '10px 14px', borderRadius: 'var(--user-radius)',
+                        background: 'var(--user-bg)',
+                        border: `1px solid ${isThis ? 'var(--user-accent)' : 'var(--user-border)'}`,
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--user-text)' }}>
+                          {cat}
+                          {isThis && (
+                            <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: 'var(--user-accent)' }}>THIS EXAM</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--user-text-muted)', marginTop: 2 }}>
+                          weight {Math.round(GWA_WEIGHTS[cat] * 100)}%
+                        </div>
+                      </div>
+                      {a ? (
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: scoreColor(a.percentage) }}>{a.percentage}%</div>
+                          <div style={{ fontSize: 11, color: 'var(--user-text-muted)' }}>
+                            {a.percentage}% × {GWA_WEIGHTS[cat]} = {fmt(points(a.percentage, cat))} pts
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: 'var(--user-text-muted)' }}>Not taken yet</div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <p style={{ margin: '4px 0 0', fontSize: 11.5, color: 'var(--user-text-sub)', lineHeight: 1.6 }}>
+                  {!gwa.complete
+                    ? <>GWA is computed once all three areas have a score. Still missing: <strong>{gwa.missing.join(', ')}</strong>.</>
+                    : gwa.failedAreas.length > 0
+                      ? <>{gwa.failedAreas.join(' and ')} {gwa.failedAreas.length > 1 ? 'are' : 'is'} below the 50% area minimum, which fails the standing regardless of GWA.</>
+                      : <>Uses your latest score in each area.</>}
+                </p>
               </div>
             </div>
 
@@ -269,7 +364,7 @@ export default function ResultsPage() {
             </div>
           </div>
 
-                    {/* Right — Answer Key + Explanations */}
+          {/* Right — Answer Key + Explanations */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="user-card">
               <div className="user-card-header">
@@ -357,9 +452,8 @@ export default function ResultsPage() {
                               {exp ? (
                                 <p style={{ fontSize: 12.5, color: 'var(--user-text-sub)', margin: 0, lineHeight: 1.6 }}>{exp}</p>
                               ) : isTheCorrect && q.explanation ? (
-                                // Fallback to the old single overall explanation
-                                // for older attempts saved before per-choice
-                                // explanations existed.
+                                // Fallback sa lumang single explanation para sa mga attempt
+                                // na na-save bago nagkaroon ng per-choice explanations.
                                 <p style={{ fontSize: 12.5, color: 'var(--user-text-sub)', margin: 0, lineHeight: 1.6 }}>{q.explanation}</p>
                               ) : null}
                             </div>
